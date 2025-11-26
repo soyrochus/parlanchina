@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block body %}
+<div class="flex flex-1">
+  <aside class="hidden md:flex w-72 flex-col border-r border-slate-200/80 bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/50">
+    <div class="flex items-center justify-between px-4 py-4">
+      <div>
+        <p class="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Parlanchina</p>
+        <p class="text-lg font-display font-semibold">Chats</p>
+      </div>
+      <div class="flex gap-2" id="theme-toggle">
+        <button class="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs" data-theme="light">Light</button>
+        <button class="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs" data-theme="dark">Dark</button>
+        <button class="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs" data-theme="system">System</button>
+      </div>
+    </div>
+    <div class="px-4">
+      <form action="{{ url_for('main.new_chat') }}" method="post" class="w-full">
+        <button type="submit" class="w-full rounded-lg bg-slate-900 text-white dark:bg-white dark:text-slate-900 py-2 font-medium shadow-sm">+ New chat</button>
+      </form>
+    </div>
+    <div class="mt-4 flex-1 overflow-y-auto px-2">
+      <ul class="space-y-1">
+        {% for s in sessions %}
+        <li>
+          <a href="{{ url_for('main.chat', session_id=s.id) }}" class="block rounded-lg px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 {% if s.id == session.id %}bg-slate-100 dark:bg-slate-800{% endif %}">
+            <p class="font-medium truncate">{{ s.title }}</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ s.updated_at }}</p>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </aside>
+
+  <main class="flex-1 flex flex-col">
+    <header class="flex items-center justify-between px-4 py-4 border-b border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur">
+      <div>
+        <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Session</p>
+        <h1 class="text-xl font-display font-semibold">{{ session.title }}</h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <label class="text-sm text-slate-500 dark:text-slate-400">Model</label>
+        <select id="model-select" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50" data-default-model="{{ selected_model }}">
+          {% if models %}
+            {% for model in models %}
+              <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>{{ model }}</option>
+            {% endfor %}
+          {% else %}
+            <option value="{{ selected_model }}" selected>{{ selected_model or "default" }}</option>
+          {% endif %}
+        </select>
+      </div>
+    </header>
+
+    <section id="messages" class="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+      {% for message in session.messages %}
+        {% if message.role == 'user' %}
+          <div class="flex justify-end">
+            <div class="max-w-3xl rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-4 py-3 shadow-sm">
+              <p class="whitespace-pre-wrap">{{ message.content }}</p>
+            </div>
+          </div>
+        {% else %}
+          <div class="flex justify-start">
+            <div class="prose prose-slate dark:prose-invert max-w-3xl rounded-2xl bg-white/80 dark:bg-slate-800/70 px-4 py-3 shadow-sm">
+              {{ message.html|safe }}
+            </div>
+          </div>
+        {% endif %}
+      {% endfor %}
+    </section>
+
+    <footer class="border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-900/60 backdrop-blur">
+      <form id="chat-form" data-session-id="{{ session.id }}" class="px-4 py-3 flex flex-col gap-3">
+        <div class="flex gap-2">
+          <button type="button" class="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">Attachment</button>
+          <button type="button" class="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">Variables</button>
+          <button type="button" class="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">Templates</button>
+        </div>
+        <div class="flex items-end gap-3">
+          <div class="flex-1">
+            <textarea name="message" rows="3" placeholder="Message" class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base shadow-sm focus:border-slate-400 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50" id="message-input"></textarea>
+          </div>
+          <button type="submit" class="h-11 w-12 flex items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm dark:bg-white dark:text-slate-900">➤</button>
+        </div>
+      </form>
+    </footer>
+  </main>
+</div>
+{% endblock %}

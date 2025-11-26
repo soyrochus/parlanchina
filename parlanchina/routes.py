@@ -1,0 +1,141 @@
+import logging
+from urllib.parse import quote
+
+from flask import (
+    Blueprint,
+    Response,
+    abort,
+    current_app,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+
+from parlanchina.services import ai_client, chat_store
+
+bp = Blueprint("main", __name__)
+logger = logging.getLogger(__name__)
+
+
+@bp.get("/")
+def index():
+    """Redirect to the latest session or create a new one."""
+    sessions = chat_store.list_sessions()
+    if sessions:
+        return redirect(url_for("main.chat", session_id=sessions[0]["id"]))
+
+    model = _resolve_model()
+    session = chat_store.create_session("New chat", model)
+    return redirect(url_for("main.chat", session_id=session["id"]))
+
+
+@bp.post("/new")
+def new_chat():
+    model = request.form.get("model") or _resolve_model()
+    title = request.form.get("title") or "New chat"
+    session = chat_store.create_session(title, model)
+    return redirect(url_for("main.chat", session_id=session["id"]))
+
+
+@bp.get("/chat/<session_id>")
+def chat(session_id: str):
+    session = chat_store.load_session(session_id)
+    if not session:
+        abort(404)
+
+    models = current_app.config.get("PARLANCHINA_MODELS", [])
+    selected_model = session.get("model") or _resolve_model()
+    sessions = chat_store.list_sessions()
+
+    return render_template(
+        "chat.html",
+        session=session,
+        sessions=sessions,
+        models=models,
+        selected_model=selected_model,
+    )
+
+
+@bp.post("/chat/<session_id>")
+def post_message(session_id: str):
+    data = request.get_json(silent=True) or request.form
+    content = (data.get("message") or "").strip()
+    model = data.get("model") or None
+    if not content:
+        abort(400, "Message content required")
+
+    session = chat_store.load_session(session_id)
+    if not session:
+        abort(404)
+
+    chat_store.append_user_message(session_id, content, model=model)
+    return jsonify({"status": "ok"})
+
+
+@bp.get("/chat/<session_id>/stream")
+def stream_response(session_id: str):
+    session = chat_store.load_session(session_id)
+    if not session:
+        abort(404)
+
+    model = request.args.get("model") or session.get("model") or _resolve_model()
+    payload_messages = _format_messages_for_model(session)
+
+    def generate():
+        import asyncio
+        # Get or create event loop for this thread
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Run the async generator in sync context
+        async_gen = ai_client.stream_chat_completion(payload_messages, model)
+        while True:
+            try:
+                chunk = loop.run_until_complete(async_gen.__anext__())
+                yield chunk
+            except StopAsyncIteration:
+                break
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+    return Response(generate(), mimetype="text/plain", headers=headers)
+
+
+@bp.post("/chat/<session_id>/finalize")
+def finalize_message(session_id: str):
+    data = request.get_json(force=True)
+    content = data.get("content", "")
+    model = data.get("model") or None
+    session = chat_store.load_session(session_id)
+    if not session:
+        abort(404)
+    message = chat_store.append_assistant_message(session_id, content, model=model)
+    return jsonify({"status": "ok", "html": message["html"], "raw": message["raw_markdown"]})
+
+
+def _resolve_model() -> str:
+    models = current_app.config.get("PARLANCHINA_MODELS") or []
+    default_model = current_app.config.get("PARLANCHINA_DEFAULT_MODEL") or ""
+    if default_model:
+        return default_model
+    if models:
+        return models[0]
+    return ""
+
+
+def _format_messages_for_model(session: dict) -> list[dict]:
+    formatted = []
+    for message in session.get("messages", []):
+        if message["role"] == "assistant":
+            content = message.get("raw_markdown") or message.get("content") or ""
+        else:
+            content = message.get("content") or ""
+        formatted.append({"role": message["role"], "content": content})
+    return formatted

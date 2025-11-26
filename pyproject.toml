@@ -1,7 +1,15 @@
 [project]
-name = "parlachina"
+name = "parlanchina"
 version = "0.1.0"
 description = "Where AI conversations come to play"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "Flask[async]>=3.0.0",
+    "python-dotenv>=1.0.0",
+    "openai>=1.30.0",
+    "markdown-it-py>=3.0.0",
+    "bleach>=6.1.0",
+    "hypercorn>=0.16.0",
+    "asgiref>=3.7.0",
+]
