@@ -47,8 +47,8 @@
     }
   </style>
 </head>
-<body class="min-h-full bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-50 font-body">
-  <div class="min-h-screen flex flex-col">
+<body class="h-full bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-50 font-body overflow-hidden">
+  <div class="h-screen flex flex-col">
     {% block body %}{% endblock %}
   </div>
   <script src="{{ url_for('static', filename='js/theme.js') }}"></script>

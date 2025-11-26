@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block body %}
-<div class="flex flex-1">
+<div class="flex flex-1 overflow-hidden">
   <aside class="hidden md:flex w-72 flex-col border-r border-slate-200/80 bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/50">
     <div class="flex items-center justify-between px-4 py-4">
       <div>
@@ -33,8 +33,8 @@
     </div>
   </aside>
 
-  <main class="flex-1 flex flex-col">
-    <header class="flex items-center justify-between px-4 py-4 border-b border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur">
+  <main class="flex-1 flex flex-col overflow-hidden">
+    <header class="flex-shrink-0 flex items-center justify-between px-4 py-4 border-b border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur">
       <div>
         <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Session</p>
         <h1 class="text-xl font-display font-semibold">{{ session.title }}</h1>
@@ -71,7 +71,7 @@
       {% endfor %}
     </section>
 
-    <footer class="border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-900/60 backdrop-blur">
+    <footer class="flex-shrink-0 border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-900/60 backdrop-blur">
       <form id="chat-form" data-session-id="{{ session.id }}" class="px-4 py-3 flex flex-col gap-3">
         <div class="flex gap-2">
           <button type="button" class="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">Attachment</button>
