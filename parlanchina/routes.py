@@ -119,6 +119,31 @@ def stream_response(session_id: str):
     return Response(generate(), mimetype="text/plain", headers=headers)
 
 
+@bp.post("/chat/<session_id>/rename")
+def rename_session(session_id: str):
+    """Rename a session."""
+    data = request.get_json(force=True)
+    new_title = (data.get("title") or "").strip()
+    if not new_title:
+        abort(400, "Title is required")
+    
+    try:
+        chat_store.update_session_title(session_id, new_title)
+        return jsonify({"status": "ok", "title": new_title})
+    except FileNotFoundError:
+        abort(404)
+
+
+@bp.delete("/chat/<session_id>")
+def delete_session(session_id: str):
+    """Delete a session."""
+    try:
+        chat_store.delete_session(session_id)
+        return jsonify({"status": "ok"})
+    except FileNotFoundError:
+        abort(404)
+
+
 @bp.get("/chat/<session_id>/info")
 def get_session_info(session_id: str):
     """Get session information including current title."""

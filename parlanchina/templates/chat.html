@@ -22,11 +22,31 @@
     <div class="mt-4 flex-1 overflow-y-auto px-2">
       <ul class="space-y-1">
         {% for s in sessions %}
-        <li>
+        <li class="session-item group relative" data-session-id="{{ s.id }}">
           <a href="{{ url_for('main.chat', session_id=s.id) }}" class="block rounded-lg px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 {% if s.id == session.id %}bg-slate-100 dark:bg-slate-800{% endif %}">
-            <p class="font-medium truncate">{{ s.title }}</p>
+            <p class="font-medium truncate session-title">{{ s.title }}</p>
             <p class="text-xs text-slate-500 dark:text-slate-400">{{ s.updated_at }}</p>
           </a>
+          <button class="session-menu-trigger absolute right-2 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700" data-session-id="{{ s.id }}">
+            <span class="text-slate-500 dark:text-slate-400 text-sm">⋯</span>
+          </button>
+          <div class="session-menu absolute right-2 top-8 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg z-10 hidden">
+            <div class="flex">
+              <button class="rename-btn px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-700 rounded-l-lg" data-session-id="{{ s.id }}">
+                Rename
+              </button>
+              <button class="delete-btn px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-700 rounded-r-lg text-red-600 dark:text-red-400" data-session-id="{{ s.id }}">
+                Delete
+              </button>
+            </div>
+          </div>
+          <div class="rename-input-container absolute inset-0 bg-white dark:bg-slate-800 rounded-lg hidden">
+            <input type="text" class="rename-input w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm" data-session-id="{{ s.id }}" />
+            <div class="flex gap-1 mt-1">
+              <button class="rename-save text-xs px-2 py-1 bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded" data-session-id="{{ s.id }}">Save</button>
+              <button class="rename-cancel text-xs px-2 py-1 border border-slate-300 dark:border-slate-600 rounded" data-session-id="{{ s.id }}">Cancel</button>
+            </div>
+          </div>
         </li>
         {% endfor %}
       </ul>
@@ -54,21 +74,30 @@
     </header>
 
     <section id="messages" class="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-      {% for message in session.messages %}
-        {% if message.role == 'user' %}
-          <div class="flex justify-end">
-            <div class="max-w-3xl rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-4 py-3 shadow-sm">
-              <p class="whitespace-pre-wrap">{{ message.content }}</p>
+      {% if session.messages %}
+        {% for message in session.messages %}
+          {% if message.role == 'user' %}
+            <div class="flex justify-end">
+              <div class="max-w-3xl rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-4 py-3 shadow-sm">
+                <p class="whitespace-pre-wrap">{{ message.content }}</p>
+              </div>
             </div>
-          </div>
-        {% else %}
-          <div class="flex justify-start">
-            <div class="prose prose-slate dark:prose-invert max-w-3xl rounded-2xl bg-white/80 dark:bg-slate-800/70 px-4 py-3 shadow-sm">
-              {{ message.html|safe }}
+          {% else %}
+            <div class="flex justify-start">
+              <div class="prose prose-slate dark:prose-invert max-w-3xl rounded-2xl bg-white/80 dark:bg-slate-800/70 px-4 py-3 shadow-sm">
+                {{ message.html|safe }}
+              </div>
             </div>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <div class="flex items-center justify-center h-full text-center">
+          <div class="text-slate-500 dark:text-slate-400">
+            <p class="text-lg font-medium mb-2">Start a new conversation</p>
+            <p class="text-sm">Send a message to begin chatting.</p>
           </div>
-        {% endif %}
-      {% endfor %}
+        </div>
+      {% endif %}
     </section>
 
     <footer class="flex-shrink-0 border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-900/60 backdrop-blur">

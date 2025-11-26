@@ -97,6 +97,14 @@ def update_session_title(session_id: str, title: str) -> None:
     _save_session(session)
 
 
+def delete_session(session_id: str) -> None:
+    """Delete a session file."""
+    path = _session_path(session_id)
+    if not path.exists():
+        raise FileNotFoundError(f"Session {session_id} not found")
+    path.unlink()
+
+
 def _save_session(session: dict[str, Any]) -> None:
     path = _session_path(session["id"])
     path.parent.mkdir(parents=True, exist_ok=True)

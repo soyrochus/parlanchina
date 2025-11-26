@@ -4,15 +4,20 @@ document.addEventListener("DOMContentLoaded", () => {
   const textarea = document.getElementById("message-input");
   const modelSelect = document.getElementById("model-select");
   const sessionTitleEl = document.querySelector("h1"); // Main session title
-  const sidebarTitleEl = document.querySelector(`a[href*="${window.location.pathname}"] p.font-medium`); // Sidebar title
   
   const md = window.markdownit({
     linkify: true,
     breaks: true,
   });
 
-  let isFirstMessage = messagesEl.children.length === 0;
+  // Check if this is the first message by looking for actual message bubbles
+  let isFirstMessage = messagesEl.querySelectorAll('.flex.justify-end, .flex.justify-start').length === 0;
   let titleCheckTimeout = null;
+  
+  // Get current session ID from form or URL
+  const getCurrentSessionId = () => {
+    return form?.dataset.sessionId || window.location.pathname.split('/').pop();
+  };
 
   const runMermaid = () => {
     if (window.mermaid) {
@@ -29,10 +34,13 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data.title !== currentTitle && data.title !== "New chat") {
           // Update main title
           sessionTitleEl.textContent = data.title;
-          // Update sidebar title if element exists
+          
+          // Update sidebar title for current session
+          const sidebarTitleEl = document.querySelector(`[data-session-id="${sessionId}"] .session-title`);
           if (sidebarTitleEl) {
             sidebarTitleEl.textContent = data.title;
           }
+          
           // Update page title
           document.title = `${data.title} - Parlanchina`;
         }
@@ -151,4 +159,147 @@ document.addEventListener("DOMContentLoaded", () => {
       streamAssistant(sessionId, model);
     });
   }
+
+  // Session management functionality
+  const initSessionManagement = () => {
+    // Handle menu trigger clicks
+    document.addEventListener('click', async (e) => {
+      // Menu trigger
+      if (e.target.closest('.session-menu-trigger')) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Close all other menus
+        document.querySelectorAll('.session-menu').forEach(menu => {
+          menu.classList.add('hidden');
+        });
+        
+        // Show this menu
+        const trigger = e.target.closest('.session-menu-trigger');
+        const menu = trigger.parentElement.querySelector('.session-menu');
+        menu.classList.remove('hidden');
+        return;
+      }
+      
+      // Rename button
+      if (e.target.closest('.rename-btn')) {
+        e.preventDefault();
+        const sessionId = e.target.closest('.rename-btn').dataset.sessionId;
+        const sessionItem = e.target.closest('.session-item');
+        const currentTitle = sessionItem.querySelector('.session-title').textContent;
+        const renameContainer = sessionItem.querySelector('.rename-input-container');
+        const renameInput = sessionItem.querySelector('.rename-input');
+        
+        // Hide menu and show rename input
+        sessionItem.querySelector('.session-menu').classList.add('hidden');
+        renameContainer.classList.remove('hidden');
+        renameInput.value = currentTitle;
+        renameInput.focus();
+        renameInput.select();
+        return;
+      }
+      
+      // Delete button
+      if (e.target.closest('.delete-btn')) {
+        e.preventDefault();
+        const sessionId = e.target.closest('.delete-btn').dataset.sessionId;
+        const sessionTitle = e.target.closest('.session-item').querySelector('.session-title').textContent;
+        
+        if (confirm(`Are you sure you want to delete "${sessionTitle}"?`)) {
+          try {
+            const response = await fetch(`/chat/${sessionId}`, {
+              method: 'DELETE'
+            });
+            
+            if (response.ok) {
+              // Remove from sidebar
+              e.target.closest('.session-item').remove();
+              
+              // If we're viewing this session, redirect to home
+              if (window.location.pathname.includes(sessionId)) {
+                window.location.href = '/';
+              }
+            } else {
+              alert('Failed to delete session.');
+            }
+          } catch (err) {
+            alert('Error deleting session.');
+          }
+        }
+        
+        // Hide menu
+        e.target.closest('.session-item').querySelector('.session-menu').classList.add('hidden');
+        return;
+      }
+      
+      // Rename save button
+      if (e.target.closest('.rename-save')) {
+        e.preventDefault();
+        const sessionId = e.target.closest('.rename-save').dataset.sessionId;
+        const sessionItem = e.target.closest('.session-item');
+        const renameInput = sessionItem.querySelector('.rename-input');
+        const newTitle = renameInput.value.trim();
+        
+        if (!newTitle) {
+          alert('Title cannot be empty.');
+          return;
+        }
+        
+        try {
+          const response = await fetch(`/chat/${sessionId}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle })
+          });
+          
+          if (response.ok) {
+            // Update title in sidebar
+            sessionItem.querySelector('.session-title').textContent = newTitle;
+            
+            // Update main title if we're viewing this session
+            if (window.location.pathname.includes(sessionId)) {
+              sessionTitleEl.textContent = newTitle;
+              document.title = `${newTitle} - Parlanchina`;
+            }
+            
+            // Hide rename input
+            sessionItem.querySelector('.rename-input-container').classList.add('hidden');
+          } else {
+            alert('Failed to rename session.');
+          }
+        } catch (err) {
+          alert('Error renaming session.');
+        }
+        return;
+      }
+      
+      // Rename cancel button
+      if (e.target.closest('.rename-cancel')) {
+        e.preventDefault();
+        const sessionItem = e.target.closest('.session-item');
+        sessionItem.querySelector('.rename-input-container').classList.add('hidden');
+        return;
+      }
+      
+      // Click outside - close all menus
+      if (!e.target.closest('.session-menu') && !e.target.closest('.session-menu-trigger')) {
+        document.querySelectorAll('.session-menu').forEach(menu => {
+          menu.classList.add('hidden');
+        });
+      }
+    });
+    
+    // Handle Enter key in rename input
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.classList.contains('rename-input')) {
+        e.target.closest('.session-item').querySelector('.rename-save').click();
+      }
+      if (e.key === 'Escape' && e.target.classList.contains('rename-input')) {
+        e.target.closest('.session-item').querySelector('.rename-cancel').click();
+      }
+    });
+  };
+  
+  // Initialize session management
+  initSessionManagement();
 });
