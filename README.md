@@ -14,6 +14,8 @@
 
 Minimal, demo-ready Flask chat UI that streams replies from an OpenAI-compatible backend. Single-user for now, architected to grow into multi-user later.
 
+![Parlanchina logo](images/parlanchina-logo-small.png)
+
 Parlanchina intents to bridge the gap between quick prototypes and polished demos—giving you a clean, responsive UI that works as well in stakeholder presentations as it does in your development workflow. Built for developers who need to test AI integrations without compromising on user experience, and for teams who want demos that actually look demo-worthy.
 
 ## What it Parlanchina provides
