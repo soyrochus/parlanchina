@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "demo-openapi": {
+      "command": "uvx",
+      "args": ["awslabs.openapi-mcp-server@latest"],
+      "env": {
+        "API_NAME": "demo-api",
+        "API_BASE_URL": "http://localhost:8000/api",
+        "API_SPEC_URL": "http://localhost:8000/api/docs.json",
+        "LOG_LEVEL": "ERROR",
+        "ENABLE_OPERATION_PROMPTS": "true"
+      }
+    },
+    "postgres": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-postgres-server"],
+      "env": {
+        "PG_HOST": "localhost",
+        "PG_PORT": "5433",
+        "PG_USER": "main",
+        "PG_PASSWORD": "main",
+        "PG_DATABASE": "main"
+      }
+    }
+  }
+}
