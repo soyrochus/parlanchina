@@ -9,6 +9,33 @@ document.addEventListener("DOMContentLoaded", () => {
     linkify: true,
     breaks: true,
   });
+  
+  // Custom fence renderer for Mermaid diagrams
+  const defaultFence = md.renderer.rules.fence;
+  md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+    const token = tokens[idx];
+    const info = token.info ? token.info.trim() : '';
+    
+    if (info === 'mermaid') {
+      const content = token.content;
+      const escapedContent = content
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+      
+      return `<div class="mermaid-container">` +
+        `<button class="mermaid-zoom-btn" title="Zoom diagram">` +
+        `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">` +
+        `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/>` +
+        `</svg></button>` +
+        `<pre class="mermaid" data-mermaid-source="${escapedContent}">${escapedContent}</pre>` +
+        `</div>`;
+    }
+    
+    return defaultFence(tokens, idx, options, env, self);
+  };
 
   // Check if this is the first message by looking for actual message bubbles
   let isFirstMessage = messagesEl.querySelectorAll('.flex.justify-end, .flex.justify-start').length === 0;
@@ -23,6 +50,42 @@ document.addEventListener("DOMContentLoaded", () => {
     if (window.mermaid) {
       window.mermaid.run();
     }
+  };
+  
+  const wrapMermaidDiagrams = (container) => {
+    // Find all mermaid pre elements that aren't already wrapped
+    const mermaidPres = container.querySelectorAll('pre.mermaid');
+    mermaidPres.forEach(pre => {
+      // Skip if already wrapped
+      if (pre.parentElement && pre.parentElement.classList.contains('mermaid-container')) {
+        return;
+      }
+      
+      // Store the mermaid source
+      const source = pre.textContent;
+      
+      // Create wrapper
+      const wrapper = document.createElement('div');
+      wrapper.className = 'mermaid-container';
+      
+      // Create zoom button
+      const button = document.createElement('button');
+      button.className = 'mermaid-zoom-btn';
+      button.title = 'Zoom diagram';
+      button.innerHTML = `
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/>
+        </svg>
+      `;
+      
+      // Store source as data attribute
+      pre.setAttribute('data-mermaid-source', source);
+      
+      // Wrap the pre element
+      pre.parentNode.insertBefore(wrapper, pre);
+      wrapper.appendChild(button);
+      wrapper.appendChild(pre);
+    });
   };
 
   const checkForTitleUpdate = async (sessionId) => {
@@ -117,7 +180,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
         const rendered = md.render(buffer);
-        contentDiv.innerHTML = DOMPurify.sanitize(rendered);
+        contentDiv.innerHTML = DOMPurify.sanitize(rendered, {
+          ADD_TAGS: ['button', 'svg', 'path'],
+          ADD_ATTR: ['stroke', 'stroke-linecap', 'stroke-linejoin', 'stroke-width', 'd', 'viewBox', 'fill', 'data-mermaid-source']
+        });
+        wrapMermaidDiagrams(contentDiv);
         runMermaid();
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
@@ -131,6 +198,7 @@ document.addEventListener("DOMContentLoaded", () => {
         contentDiv.innerHTML = data.html;
         // Store the raw text in the message wrapper
         messageWrapper.setAttribute('data-raw-text', data.raw);
+        wrapMermaidDiagrams(contentDiv);
         runMermaid();
       } else {
         contentDiv.innerHTML = `<p class="text-sm text-red-500">Failed to save response.</p>`;
