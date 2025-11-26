@@ -24,15 +24,74 @@ No compromises between functionality and presentation.
 
 ![Parlanchine UI](images/parlanchina-ui.png)
 
-## Quickstart
+## Installation
+
+### Prerequisites
+
+- Python 3.12 or higher
+- [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
+
+To install uv:
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e .
-cp .env.example .env
-hypercorn parlanchina:app --bind 127.0.0.1:5000 --reload
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
+
+### Get Parlanchina
+
+Clone the repository:
+
+```bash
+git clone https://github.com/soyrochus/parlanchina.git
+cd parlanchina
+```
+
+### Install dependencies
+
+Use uv to create a virtual environment and install all dependencies:
+
+```bash
+uv sync
+```
+
+This will automatically create a `.venv` directory and install all required packages defined in `pyproject.toml`.
+
+### Configure environment
+
+Copy the example environment file and edit it with your API credentials:
+
+```bash
+cp .env.example .env
+# Edit .env with your OPENAI_API_KEY and other settings
+```
+
+## Quickstart
+
+If you've already completed the installation steps above, start the app with:
+
+**macOS/Linux:**
+
+```bash
+./parlanchina.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+.\parlanchina.ps1
+```
+
+**Or manually:**
+
+```bash
+uv run hypercorn parlanchina:app --bind 127.0.0.1:5000 --reload
+```
+
+Then open your browser to `http://127.0.0.1:5000`
 
 ## Configuration
 
@@ -54,10 +113,26 @@ Set these in `.env` (loaded via `python-dotenv`):
 
 ## Running the app
 
-The app uses **Hypercorn** (ASGI server) to properly support async streaming routes:
+The app uses **Hypercorn** (ASGI server) to properly support async streaming routes.
+
+**Recommended:** Use the startup scripts:
+
+macOS/Linux:
 
 ```bash
-hypercorn parlanchina:app --bind 127.0.0.1:5000 --reload
+./parlanchina.sh
+```
+
+Windows (PowerShell):
+
+```powershell
+.\parlanchina.ps1
+```
+
+**Or run manually:**
+
+```bash
+uv run hypercorn parlanchina:app --bind 127.0.0.1:5000 --reload
 ```
 
 The `--reload` flag enables auto-reload during development (like Flask's debug mode).
