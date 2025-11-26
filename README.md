@@ -21,6 +21,9 @@ Parlanchina intents to bridge the gap between quick prototypes and polished demo
 Parlanchina provides a complete chat interface with theme support, conversation management, and a responsive layout that adapts from mobile to ultrawide displays. Use it to validate your (Azure) OpenAI connections, MCP integrations, demonstrate capabilities to stakeholders, or as a foundation for your own chat applications.
 No compromises between functionality and presentation.
 
+
+![Parlanchine UI](images/parlanchina-ui.png)
+
 ## Quickstart
 
 ```bash
