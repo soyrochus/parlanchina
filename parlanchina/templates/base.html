@@ -26,8 +26,26 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script>
-    mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
+    // Initialize Mermaid with theme that matches current mode
+    const initMermaid = () => {
+      const isDark = document.documentElement.classList.contains('dark');
+      mermaid.initialize({ 
+        startOnLoad: false, 
+        theme: isDark ? 'dark' : 'default'
+      });
+    };
+    initMermaid();
   </script>
+  <style>
+    /* Remove Mermaid's background, let it inherit from parent */
+    .mermaid svg {
+      background-color: transparent !important;
+    }
+    /* Ensure Mermaid container doesn't add backgrounds */
+    pre.mermaid {
+      background-color: transparent !important;
+    }
+  </style>
 </head>
 <body class="min-h-full bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-50 font-body">
   <div class="min-h-screen flex flex-col">

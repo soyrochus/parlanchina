@@ -9,6 +9,17 @@
     } else {
       root.classList.toggle("dark", mode === "dark");
     }
+    
+    // Reinitialize Mermaid with new theme
+    if (window.mermaid) {
+      const isDark = root.classList.contains('dark');
+      window.mermaid.initialize({ 
+        startOnLoad: false, 
+        theme: isDark ? 'dark' : 'default'
+      });
+      // Re-render any existing Mermaid diagrams
+      window.mermaid.run();
+    }
   };
 
   const saved = localStorage.getItem(storageKey) || "system";
