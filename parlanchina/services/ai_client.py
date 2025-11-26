@@ -65,3 +65,30 @@ async def stream_chat_completion(
         logger.info(
             "Model %s streamed %s chars in %.2fs", model, total_chars, elapsed
         )
+
+
+async def chat_completion(messages: List[dict], model: str) -> str:
+    """
+    Non-streaming chat completion that returns the full response.
+    Used for generating session titles and other background tasks.
+    """
+    client = _get_client()
+    started = time.time()
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=False,
+        )
+        content = response.choices[0].message.content or ""
+        elapsed = time.time() - started
+        logger.info(
+            "Model %s completed %s chars in %.2fs", model, len(content), elapsed
+        )
+        return content
+    except OpenAIError as exc:
+        logger.exception("AI backend error: %s", exc)
+        return "Error generating response"
+    except Exception as exc:  # pragma: no cover - catch-all safety
+        logger.exception("Unexpected AI error: %s", exc)
+        return "Unexpected error"

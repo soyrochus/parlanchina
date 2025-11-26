@@ -3,14 +3,42 @@ document.addEventListener("DOMContentLoaded", () => {
   const messagesEl = document.getElementById("messages");
   const textarea = document.getElementById("message-input");
   const modelSelect = document.getElementById("model-select");
+  const sessionTitleEl = document.querySelector("h1"); // Main session title
+  const sidebarTitleEl = document.querySelector(`a[href*="${window.location.pathname}"] p.font-medium`); // Sidebar title
+  
   const md = window.markdownit({
     linkify: true,
     breaks: true,
   });
 
+  let isFirstMessage = messagesEl.children.length === 0;
+  let titleCheckTimeout = null;
+
   const runMermaid = () => {
     if (window.mermaid) {
       window.mermaid.run();
+    }
+  };
+
+  const checkForTitleUpdate = async (sessionId) => {
+    try {
+      const response = await fetch(`/chat/${sessionId}/info`);
+      if (response.ok) {
+        const data = await response.json();
+        const currentTitle = sessionTitleEl.textContent;
+        if (data.title !== currentTitle && data.title !== "New chat") {
+          // Update main title
+          sessionTitleEl.textContent = data.title;
+          // Update sidebar title if element exists
+          if (sidebarTitleEl) {
+            sidebarTitleEl.textContent = data.title;
+          }
+          // Update page title
+          document.title = `${data.title} - Parlanchina`;
+        }
+      }
+    } catch (err) {
+      console.debug("Failed to check for title update:", err);
     }
   };
 
@@ -98,6 +126,27 @@ document.addEventListener("DOMContentLoaded", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: content, model }),
       });
+
+      // If this was the first message, start checking for title updates
+      if (isFirstMessage) {
+        isFirstMessage = false;
+        // Start checking for title updates after a short delay
+        setTimeout(() => {
+          const checkTitle = async () => {
+            await checkForTitleUpdate(sessionId);
+            // Continue checking every 2 seconds for up to 30 seconds
+            titleCheckTimeout = setTimeout(checkTitle, 2000);
+          };
+          checkTitle();
+          // Stop checking after 30 seconds
+          setTimeout(() => {
+            if (titleCheckTimeout) {
+              clearTimeout(titleCheckTimeout);
+              titleCheckTimeout = null;
+            }
+          }, 30000);
+        }, 1000);
+      }
 
       streamAssistant(sessionId, model);
     });

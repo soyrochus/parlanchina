@@ -1,4 +1,6 @@
 import logging
+import asyncio
+import threading
 from urllib.parse import quote
 
 from flask import (
@@ -70,7 +72,16 @@ def post_message(session_id: str):
     if not session:
         abort(404)
 
+    # Check if this is the first user message in the session
+    is_first_message = len(session.get("messages", [])) == 0
+    
     chat_store.append_user_message(session_id, content, model=model)
+    
+    # Generate session title in background for first message
+    if is_first_message:
+        used_model = model or session.get("model") or _resolve_model()
+        _generate_session_title_async(session_id, content, used_model)
+    
     return jsonify({"status": "ok"})
 
 
@@ -108,6 +119,19 @@ def stream_response(session_id: str):
     return Response(generate(), mimetype="text/plain", headers=headers)
 
 
+@bp.get("/chat/<session_id>/info")
+def get_session_info(session_id: str):
+    """Get session information including current title."""
+    session = chat_store.load_session(session_id)
+    if not session:
+        abort(404)
+    return jsonify({
+        "id": session["id"],
+        "title": session["title"],
+        "updated_at": session["updated_at"]
+    })
+
+
 @bp.post("/chat/<session_id>/finalize")
 def finalize_message(session_id: str):
     data = request.get_json(force=True)
@@ -139,3 +163,51 @@ def _format_messages_for_model(session: dict) -> list[dict]:
             content = message.get("content") or ""
         formatted.append({"role": message["role"], "content": content})
     return formatted
+
+
+def _generate_session_title_async(session_id: str, user_message: str, model: str):
+    """Generate a session title in a background thread."""
+    # Capture the current Flask app context
+    app = current_app._get_current_object()
+    
+    def _run_title_generation():
+        try:
+            # Use the captured app context in the thread
+            with app.app_context():
+                # Create new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Prepare the title generation prompt
+                title_prompt = [
+                    {
+                        "role": "system", 
+                        "content": "You are a helpful assistant that creates concise, descriptive titles for chat sessions. Generate a short title (3-6 words) that summarizes the main topic or request from the user's message. Respond with only the title, no quotes or additional text."
+                    },
+                    {
+                        "role": "user", 
+                        "content": f"Create a short title for a chat session based on this user message: {user_message}"
+                    }
+                ]
+                
+                # Generate title using AI
+                title = loop.run_until_complete(ai_client.chat_completion(title_prompt, model))
+                
+                # Clean up the title (remove quotes if present, limit length)
+                title = title.strip().strip('"').strip("'")
+                if len(title) > 50:  # Limit title length
+                    title = title[:47] + "..."
+                
+                # Update the session with the new title
+                chat_store.update_session_title(session_id, title)
+                logger.info(f"Generated title for session {session_id}: {title}")
+                
+        except Exception as e:
+            logger.error(f"Failed to generate title for session {session_id}: {e}")
+        finally:
+            if 'loop' in locals():
+                loop.close()
+    
+    # Run in background thread
+    thread = threading.Thread(target=_run_title_generation, daemon=True)
+    thread.start()

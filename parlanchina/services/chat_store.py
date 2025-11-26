@@ -87,6 +87,16 @@ def append_assistant_message(session_id: str, content: str, *, model: str | None
     return message
 
 
+def update_session_title(session_id: str, title: str) -> None:
+    """Update the title of an existing session."""
+    session = load_session(session_id)
+    if not session:
+        raise FileNotFoundError(f"Session {session_id} not found")
+    session["title"] = title
+    session["updated_at"] = _now()
+    _save_session(session)
+
+
 def _save_session(session: dict[str, Any]) -> None:
     path = _session_path(session["id"])
     path.parent.mkdir(parents=True, exist_ok=True)
