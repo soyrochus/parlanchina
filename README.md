@@ -106,6 +106,39 @@ Set these in `.env` (loaded via `python-dotenv`):
 - `PARLANCHINA_MODELS` — comma list of allowed models (e.g. `gpt-4o-mini,gpt-4o`)
 - `PARLANCHINA_DEFAULT_MODEL` — picked if user does not select one
 
+### MCP configuration
+
+Parlanchina can optionally connect to MCP servers via [FastMCP](https://pypi.org/project/fastmcp/). Add `fastmcp` to your environment (e.g., `uv add fastmcp`) and define `mcp.json` in the project root:
+
+```json
+{
+  "servers": [
+    {
+      "name": "demo-openapi",
+      "description": "Demo OpenAPI server",
+      "transport": {
+        "type": "stdio",
+        "command": "uvx",
+        "args": ["awslabs.openapi-mcp-server@latest"],
+        "env": { "API_BASE_URL": "http://localhost:8000/api" }
+      }
+    },
+    {
+      "name": "remote-sse",
+      "transport": {
+        "type": "sse",
+        "url": "https://example.com/mcp/sse",
+        "headers": { "Authorization": "Bearer <token>" }
+      }
+    }
+  ]
+}
+```
+
+- Supported transports: `stdio` (command/args/env) and `sse` (url/headers).
+- If `mcp.json` is missing or malformed, the chat UI still works and MCP controls stay disabled.
+- MCP tool runs can be triggered from the chat UI; successful calls are added to the current transcript.
+
 ## Features
 
 - Async Flask routes with streamed responses via ASGI (Hypercorn)
@@ -143,11 +176,13 @@ The `--reload` flag enables auto-reload during development (like Flask's debug m
 
 - `parlanchina/__init__.py` — app factory
 - `parlanchina/routes.py` — routes + streaming endpoints
+- `parlanchina/mcp_routes.py` — JSON routes for MCP server discovery and tool calls
 - `parlanchina/services/ai_client.py` — OpenAI/Azure streaming wrapper
 - `parlanchina/services/chat_store.py` — JSON storage
+- `parlanchina/services/mcp_manager.py` — sync façade over FastMCP clients and configuration parsing
 - `parlanchina/utils/markdown.py` — safe Markdown → HTML
 - `parlanchina/templates/` — Jinja templates
-- `parlanchina/static/js/` — theme + streaming handlers
+- `parlanchina/static/js/` — theme, streaming handlers, and MCP UI helpers
 - `data/sessions/` — stored conversations
 
 ## Notes

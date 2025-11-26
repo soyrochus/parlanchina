@@ -8,6 +8,7 @@ dependencies = [
     "Flask[async]>=3.0.0",
     "python-dotenv>=1.0.0",
     "openai>=1.30.0",
+    "fastmcp>=2.13.1",
     "markdown-it-py>=3.0.0",
     "bleach>=6.1.0",
     "hypercorn>=0.16.0",

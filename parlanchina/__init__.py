@@ -27,9 +27,10 @@ def create_app() -> Flask:
     # Ensure persistence directory exists.
     app.config["DATA_DIR"].mkdir(parents=True, exist_ok=True)
 
-    from parlanchina import routes
+    from parlanchina import mcp_routes, routes
 
     app.register_blueprint(routes.bp)
+    app.register_blueprint(mcp_routes.bp)
 
     return app
 

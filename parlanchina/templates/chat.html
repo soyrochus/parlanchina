@@ -71,6 +71,43 @@
       {% endfor %}
     </section>
 
+    <section id="mcp-panel" data-session-id="{{ session.id }}" class="border-t border-slate-200/80 bg-white/70 px-4 py-4 dark:border-slate-800 dark:bg-slate-900/60">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">MCP Tools</p>
+          <p class="text-sm text-slate-600 dark:text-slate-300">Connect to Model Context Protocol servers to run tools manually.</p>
+        </div>
+        <span id="mcp-status" class="text-xs text-slate-500 dark:text-slate-400">Loading MCP configuration…</span>
+      </div>
+      <div id="mcp-controls" class="mt-3 hidden space-y-3">
+        <div class="grid gap-3 md:grid-cols-3">
+          <label class="flex flex-col text-sm text-slate-700 dark:text-slate-200">
+            <span class="mb-1 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Server</span>
+            <select id="mcp-server-select" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50"></select>
+          </label>
+          <label class="flex flex-col text-sm text-slate-700 dark:text-slate-200">
+            <span class="mb-1 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Tool</span>
+            <select id="mcp-tool-select" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50"></select>
+          </label>
+          <div class="flex items-end justify-end">
+            <button id="mcp-run" type="button" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm dark:bg-white dark:text-slate-900">Run tool</button>
+          </div>
+        </div>
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="flex flex-col text-sm text-slate-700 dark:text-slate-200">
+            <span class="mb-1 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Arguments (JSON)</span>
+            <textarea id="mcp-args" rows="2" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50" placeholder="{ }"></textarea>
+          </label>
+          <div class="rounded-lg border border-dashed border-slate-200 p-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+            <p class="font-medium">Tool details</p>
+            <p id="mcp-tool-description" class="mt-1 text-xs text-slate-500 dark:text-slate-400">Select a tool to see its description.</p>
+            <pre id="mcp-tool-schema" class="mt-2 overflow-auto rounded bg-slate-100 p-2 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"></pre>
+          </div>
+        </div>
+        <div id="mcp-result" class="rounded-lg border border-slate-200 bg-white/80 p-3 text-sm text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"></div>
+      </div>
+    </section>
+
     <footer class="flex-shrink-0 border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-900/60 backdrop-blur">
       <form id="chat-form" data-session-id="{{ session.id }}" class="px-4 py-3 flex flex-col gap-3">
         <div class="flex gap-2">
