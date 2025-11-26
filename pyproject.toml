@@ -1,0 +1,7 @@
+[project]
+name = "parlachina"
+version = "0.1.0"
+description = "Where AI conversations come to play"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []

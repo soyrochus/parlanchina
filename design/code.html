@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Chat Interface</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+<script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#ff6b4a",
+              "background-light": "#f9fafb", // Light mode BG
+              "background-dark": "#141414", // Dark mode BG
+              "sidebar-light": "#f1f5f9", // Light mode sidebar
+              "sidebar-dark": "#1a1a1a", // Dark mode sidebar
+              "text-light": "#1f2937", // Light mode text
+              "text-dark": "#e5e5e5", // Dark mode text
+              "text-muted-light": "#6b7280", // Light mode muted text
+              "text-muted-dark": "#a1a1aa", // Dark mode muted text
+              "border-light": "#e5e7eb", // Light mode border
+              "border-dark": "#374151", // Dark mode border
+              "surface-light": "#ffffff", // Light mode surface (inputs, popovers)
+              "surface-dark": "#262626", // Dark mode surface
+              "hover-light": "#f3f4f6", // Light mode hover
+              "hover-dark": "#333333", // Dark mode hover
+              "user-message-light": "#e5e7eb", // Light mode user message
+              "user-message-dark": "#333333", // Dark mode user message
+            },
+            fontFamily: {
+              display: ["Roboto", "sans-serif"],
+            },
+            borderRadius: {
+              DEFAULT: "0.75rem", // 12px
+            },
+          },
+        },
+      };
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        font-size: 20px;
+      }
+    </style>
+</head>
+<body class="font-display bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark">
+<div class="flex h-screen w-full">
+<aside class="w-[240px] flex-shrink-0 bg-sidebar-light dark:bg-sidebar-dark flex flex-col p-2">
+<div class="flex items-center justify-between p-2 mb-2">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-700"></div>
+<span class="font-bold text-lg text-text-light dark:text-text-dark">Parlanchina</span>
+</div>
+<button class="p-1 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark">
+<span class="material-symbols-outlined text-text-muted-light dark:text-text-muted-dark">dark_mode</span>
+</button>
+</div>
+<button class="flex items-center gap-3 w-full text-left bg-primary text-white font-medium py-2 px-3 rounded-lg hover:opacity-90 transition-opacity mb-4">
+<span class="material-symbols-outlined">add</span>
+                New chat
+            </button>
+<div class="flex-grow overflow-y-auto pr-1">
+<ul class="space-y-1">
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Chat app development guide</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Python Function to Parse Folder ...</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Capgemini Company History</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Unit Test for shout.py</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Person Data Entry and Managem...</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Unit Tests for shout.py</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Uppercase Conversion for shout...</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Generating Output from shout.py</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">MCP Server Implementation wit...</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Extracting and Displaying Two P...</a></li>
+<li><a class="block truncate text-sm py-1.5 px-3 rounded-md hover:bg-hover-light dark:hover:bg-hover-dark" href="#">Assistance Requested</a></li>
+</ul>
+</div>
+</aside>
+<main class="flex-grow flex flex-col items-center">
+<div class="w-full max-w-[880px] flex-grow flex flex-col relative px-4">
+<div class="flex justify-end pt-4">
+<button class="flex items-center gap-1.5 text-sm py-1 px-2 rounded-md border border-border-light dark:border-border-dark hover:bg-hover-light dark:hover:bg-hover-dark">
+<span>Sonnet 4.5</span>
+<span class="material-symbols-outlined !text-base">expand_more</span>
+</button>
+</div>
+<div class="flex-grow overflow-y-auto py-8 space-y-8">
+<div class="flex items-start gap-4 pr-16">
+<div class="w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-700 flex-shrink-0 mt-1"></div>
+<div class="flex-grow">
+<p class="font-bold text-text-light dark:text-text-dark">Parlanchina</p>
+<p class="text-text-light dark:text-text-dark">Hello! How can I help you today? Feel free to ask me anything about frontend design, Tailwind CSS, or creating beautiful user interfaces.</p>
+</div>
+</div>
+<div class="flex justify-end">
+<div class="bg-user-message-light dark:bg-user-message-dark p-4 rounded-lg rounded-br-none max-w-2xl">
+<p>Can you show me how to create a chat interface like this one? I need it to be responsive and have both light and dark modes.</p>
+</div>
+</div>
+<div class="flex items-start gap-4 pr-16">
+<div class="w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-700 flex-shrink-0 mt-1"></div>
+<div class="flex-grow">
+<p class="font-bold text-text-light dark:text-text-dark">Parlanchina</p>
+<p class="text-text-light dark:text-text-dark">Of course! Here is the complete HTML and Tailwind CSS code for a responsive, dual-mode chat interface based on the design you provided. I've used best practices for a clean and modern look.</p>
+</div>
+</div>
+</div>
+<div class="sticky bottom-0 pb-6 bg-background-light dark:bg-background-dark">
+<div class="relative">
+<div class="absolute bottom-full mb-2 w-[240px] bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-lg shadow-lg">
+<a class="flex items-center justify-between px-3 py-2.5 text-sm hover:bg-hover-light dark:hover:bg-hover-dark rounded-t-lg" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined !text-base text-text-muted-light dark:text-text-muted-dark">folder_managed</span>
+<span>Use a project</span>
+</div>
+<span class="material-symbols-outlined !text-base text-text-muted-light dark:text-text-muted-dark">chevron_right</span>
+</a>
+<div class="border-t border-border-light dark:border-border-dark"></div>
+<a class="flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-hover-light dark:hover:bg-hover-dark" href="#">
+<svg class="bi bi-github text-text-muted-light dark:text-text-muted-dark" fill="currentColor" height="16" viewBox="0 0 16 16" width="16" xmlns="http://www.w3.org/2000/svg">
+<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"></path>
+</svg>
+<span>Postgress MCP Server</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-hover-light dark:hover:bg-hover-dark" href="#">
+<span class="material-symbols-outlined !text-base text-text-muted-light dark:text-text-muted-dark">photo_camera</span>
+<span>OpenAPI MCP Server</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-hover-light dark:hover:bg-hover-dark rounded-b-lg" href="#">
+<span class="material-symbols-outlined !text-base text-text-muted-light dark:text-text-muted-dark">attach_file</span>
+<span>Upload a file</span>
+</a>
+</div>
+<div class="flex items-end gap-2 p-1.5 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-lg">
+<div class="flex items-center">
+<button class="p-2 rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-hover-light dark:hover:bg-hover-dark">
+<span class="material-symbols-outlined">add_circle</span>
+</button>
+</div>
+<textarea class="flex-grow bg-transparent focus:ring-0 border-0 resize-none p-2 text-text-light dark:text-text-dark placeholder-text-muted-light dark:placeholder-text-muted-dark max-h-48" placeholder="Type your message here..." rows="1"></textarea>
+<button class="w-8 h-8 flex-shrink-0 flex items-center justify-center bg-primary rounded-md text-white hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined">arrow_upward</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<div class="flex-grow hidden lg:block"></div>
+</div>
+
+</body></html>
