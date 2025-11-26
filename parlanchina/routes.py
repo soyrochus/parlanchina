@@ -15,7 +15,7 @@ from flask import (
     url_for,
 )
 
-from parlanchina.services import ai_client, chat_store
+from parlanchina.services import chat_store, llm
 
 bp = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ def stream_response(session_id: str):
             asyncio.set_event_loop(loop)
         
         # Run the async generator in sync context
-        async_gen = ai_client.stream_chat_completion(payload_messages, model)
+        async_gen = llm.stream_response(payload_messages, model)
         while True:
             try:
                 chunk = loop.run_until_complete(async_gen.__anext__())
@@ -216,7 +216,9 @@ def _generate_session_title_async(session_id: str, user_message: str, model: str
                 ]
                 
                 # Generate title using AI
-                title = loop.run_until_complete(ai_client.chat_completion(title_prompt, model))
+                title = loop.run_until_complete(
+                    llm.complete_response(title_prompt, model)
+                )
                 
                 # Clean up the title (remove quotes if present, limit length)
                 title = title.strip().strip('"').strip("'")

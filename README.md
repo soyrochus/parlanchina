@@ -143,7 +143,7 @@ The `--reload` flag enables auto-reload during development (like Flask's debug m
 
 - `parlanchina/__init__.py` — app factory
 - `parlanchina/routes.py` — routes + streaming endpoints
-- `parlanchina/services/ai_client.py` — OpenAI/Azure streaming wrapper
+- `parlanchina/services/llm.py` — OpenAI/Azure Responses API wrapper
 - `parlanchina/services/chat_store.py` — JSON storage
 - `parlanchina/utils/markdown.py` — safe Markdown → HTML
 - `parlanchina/templates/` — Jinja templates
