@@ -63,13 +63,34 @@ document.addEventListener("DOMContentLoaded", () => {
   const appendAssistantBubble = () => {
     const wrapper = document.createElement("div");
     wrapper.className = "flex justify-start";
-    const bubble = document.createElement("div");
-    bubble.className = "prose prose-slate dark:prose-invert max-w-3xl rounded-2xl bg-white/80 dark:bg-slate-800/70 px-4 py-3 shadow-sm";
-    bubble.innerHTML = `<p class="text-sm text-slate-500">Thinking...</p>`;
-    wrapper.appendChild(bubble);
+    
+    const messageWrapper = document.createElement("div");
+    messageWrapper.className = "assistant-message-wrapper max-w-3xl rounded-2xl bg-white/80 dark:bg-slate-800/70 shadow-sm";
+    
+    const contentDiv = document.createElement("div");
+    contentDiv.className = "prose prose-slate dark:prose-invert px-4 pt-3 pb-1";
+    contentDiv.innerHTML = `<p class="text-sm text-slate-500">Thinking...</p>`;
+    
+    const footerDiv = document.createElement("div");
+    footerDiv.className = "px-4 pb-3 pt-1 flex items-center";
+    footerDiv.innerHTML = `
+      <button class="copy-btn text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors" title="Copy to clipboard">
+        <svg class="copy-icon w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+        </svg>
+        <svg class="check-icon w-4 h-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+      </button>
+    `;
+    
+    messageWrapper.appendChild(contentDiv);
+    messageWrapper.appendChild(footerDiv);
+    wrapper.appendChild(messageWrapper);
     messagesEl.appendChild(wrapper);
     messagesEl.scrollTop = messagesEl.scrollHeight;
-    return bubble;
+    
+    return { contentDiv, messageWrapper };
   };
 
   const escapeHtml = (unsafe) => {
@@ -84,7 +105,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const streamAssistant = async (sessionId, model) => {
-    const bubble = appendAssistantBubble();
+    const { contentDiv, messageWrapper } = appendAssistantBubble();
     let buffer = "";
     try {
       const response = await fetch(`/chat/${sessionId}/stream?model=${encodeURIComponent(model || "")}`);
@@ -96,7 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
         const rendered = md.render(buffer);
-        bubble.innerHTML = DOMPurify.sanitize(rendered);
+        contentDiv.innerHTML = DOMPurify.sanitize(rendered);
         runMermaid();
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
@@ -107,13 +128,15 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       if (finalizeResponse.ok) {
         const data = await finalizeResponse.json();
-        bubble.innerHTML = data.html;
+        contentDiv.innerHTML = data.html;
+        // Store the raw text in the message wrapper
+        messageWrapper.setAttribute('data-raw-text', data.raw);
         runMermaid();
       } else {
-        bubble.innerHTML = `<p class="text-sm text-red-500">Failed to save response.</p>`;
+        contentDiv.innerHTML = `<p class="text-sm text-red-500">Failed to save response.</p>`;
       }
     } catch (err) {
-      bubble.innerHTML = `<p class="text-sm text-red-500">Error streaming response.</p>`;
+      contentDiv.innerHTML = `<p class="text-sm text-red-500">Error streaming response.</p>`;
     }
     messagesEl.scrollTop = messagesEl.scrollHeight;
   };
@@ -302,4 +325,70 @@ document.addEventListener("DOMContentLoaded", () => {
   
   // Initialize session management
   initSessionManagement();
+  
+  // Copy to clipboard functionality
+  const initCopyButtons = () => {
+    document.addEventListener('click', async (e) => {
+      const copyBtn = e.target.closest('.copy-btn');
+      if (!copyBtn) return;
+      
+      e.preventDefault();
+      
+      // Get the message wrapper that contains the raw text
+      const messageWrapper = copyBtn.closest('.assistant-message-wrapper');
+      if (!messageWrapper) return;
+      
+      const rawText = messageWrapper.getAttribute('data-raw-text');
+      if (!rawText) return;
+      
+      try {
+        // Copy to clipboard
+        await navigator.clipboard.writeText(rawText);
+        
+        // Visual feedback: swap icons
+        const copyIcon = copyBtn.querySelector('.copy-icon');
+        const checkIcon = copyBtn.querySelector('.check-icon');
+        
+        if (copyIcon && checkIcon) {
+          copyIcon.classList.add('hidden');
+          checkIcon.classList.remove('hidden');
+          
+          // Revert after 2 seconds
+          setTimeout(() => {
+            copyIcon.classList.remove('hidden');
+            checkIcon.classList.add('hidden');
+          }, 2000);
+        }
+      } catch (err) {
+        console.error('Failed to copy to clipboard:', err);
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = rawText;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          // Still show feedback on success
+          const copyIcon = copyBtn.querySelector('.copy-icon');
+          const checkIcon = copyBtn.querySelector('.check-icon');
+          if (copyIcon && checkIcon) {
+            copyIcon.classList.add('hidden');
+            checkIcon.classList.remove('hidden');
+            setTimeout(() => {
+              copyIcon.classList.remove('hidden');
+              checkIcon.classList.add('hidden');
+            }, 2000);
+          }
+        } catch (err2) {
+          console.error('Fallback copy also failed:', err2);
+        }
+        document.body.removeChild(textarea);
+      }
+    });
+  };
+  
+  // Initialize copy buttons
+  initCopyButtons();
 });
