@@ -262,6 +262,15 @@
       opacity: 1;
     }
 
+    .rendering-overlay.image-overlay .rendering-indicator {
+      font-size: 1rem;
+    }
+
+    .rendering-overlay.image-overlay .rendering-dot {
+      width: 1rem;
+      height: 1rem;
+    }
+
     .rendering-pending .mermaid,
     .rendering-pending svg {
       visibility: hidden;
@@ -279,6 +288,43 @@
     .dark .generated-image-wrapper {
       border-color: rgba(148, 163, 184, 0.25);
       background: rgba(15, 23, 42, 0.75);
+    }
+
+    .image-zoom-btn {
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 0.375rem;
+      padding: 0.375rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: absolute;
+      left: 0.5rem;
+      top: 0.5rem;
+      z-index: 10;
+    }
+
+    .dark .image-zoom-btn {
+      background: rgba(30, 41, 59, 0.9);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: rgb(226, 232, 240);
+    }
+
+    .image-zoom-btn:hover {
+      background: rgba(255, 255, 255, 1);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .dark .image-zoom-btn:hover {
+      background: rgba(30, 41, 59, 1);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .image-zoom-btn svg {
+      width: 1.25rem;
+      height: 1.25rem;
     }
 
     .generated-image-wrapper img {

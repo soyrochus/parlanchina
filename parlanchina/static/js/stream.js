@@ -154,14 +154,26 @@ document.addEventListener("DOMContentLoaded", () => {
       wrapper.appendChild(imgElement);
     }
 
+    if (!wrapper.querySelector('.image-zoom-btn')) {
+      const zoomBtn = document.createElement('button');
+      zoomBtn.className = 'image-zoom-btn';
+      zoomBtn.title = 'Zoom image';
+      zoomBtn.innerHTML = `
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/>
+        </svg>
+      `;
+      wrapper.appendChild(zoomBtn);
+    }
+
     let overlay = wrapper.querySelector('.rendering-overlay');
     if (!overlay) {
       overlay = document.createElement('div');
-      overlay.className = 'rendering-overlay';
+      overlay.className = 'rendering-overlay image-overlay';
       overlay.innerHTML = `
         <div class="rendering-indicator">
           <span class="rendering-dot"></span>
-          <span class="rendering-text">Rendering image...</span>
+          <span class="rendering-text">Generating image...</span>
         </div>
       `;
       wrapper.appendChild(overlay);
@@ -366,6 +378,7 @@ document.addEventListener("DOMContentLoaded", () => {
       pendingImages.push({ url: payload.url, alt_text: altText, status: 'pending' });
       collectedImages.push({ url: payload.url, alt_text: altText });
       messageWrapper.dataset.hasImages = 'true';
+      messageWrapper.dataset.isRenderingImage = 'true';
       renderBuffer();
     };
 
