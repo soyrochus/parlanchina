@@ -144,6 +144,70 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshOverlayVisibility(messageWrapper);
   };
 
+  const ensureImageWrapper = (imgElement) => {
+    if (!imgElement) return null;
+    let wrapper = imgElement.closest('.generated-image-wrapper');
+    if (!wrapper) {
+      wrapper = document.createElement('div');
+      wrapper.className = 'generated-image-wrapper';
+      imgElement.parentNode.insertBefore(wrapper, imgElement);
+      wrapper.appendChild(imgElement);
+    }
+
+    let overlay = wrapper.querySelector('.rendering-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'rendering-overlay';
+      overlay.innerHTML = `
+        <div class="rendering-indicator">
+          <span class="rendering-dot"></span>
+          <span class="rendering-text">Rendering image...</span>
+        </div>
+      `;
+      wrapper.appendChild(overlay);
+    }
+
+    return wrapper;
+  };
+
+  const wrapGeneratedImages = (container, messageWrapper, pendingImages = []) => {
+    if (!container) return;
+    const pendingSet = new Set(
+      pendingImages.filter((img) => img.status !== 'done').map((img) => img.url)
+    );
+
+    const images = container.querySelectorAll('img');
+    images.forEach((img) => {
+      const wrapper = ensureImageWrapper(img);
+      const overlay = wrapper?.querySelector('.rendering-overlay');
+      const src = img.getAttribute('src');
+      const isPending = pendingSet.has(src);
+
+      if (!img.dataset.boundLoad) {
+        img.dataset.boundLoad = 'true';
+        img.addEventListener('load', () => {
+          const matching = pendingImages.find((item) => item.url === src);
+          if (matching) matching.status = 'done';
+          overlay?.classList.remove('visible');
+        });
+        img.addEventListener('error', () => {
+          if (overlay) {
+            overlay.classList.add('visible');
+            const text = overlay.querySelector('.rendering-text');
+            if (text) text.textContent = 'Failed to load image';
+          }
+        });
+      }
+
+      if (overlay) {
+        overlay.classList.toggle('visible', isPending);
+        wrapper.classList.toggle('rendering-pending', isPending);
+      }
+    });
+
+    messageWrapper.dataset.isRenderingImage = pendingSet.size ? 'true' : 'false';
+  };
+
   const checkForTitleUpdate = async (sessionId) => {
     try {
       const response = await fetch(`/chat/${sessionId}/info`);
@@ -169,7 +233,18 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
+  const initializeExistingMessages = () => {
+    document.querySelectorAll('.assistant-message-wrapper').forEach((wrapper) => {
+      const content = wrapper.querySelector('.prose');
+      if (content) {
+        wrapMermaidDiagrams(content);
+        wrapGeneratedImages(content, wrapper, []);
+      }
+    });
+  };
+
   runMermaid();
+  initializeExistingMessages();
 
   const appendUserBubble = (content) => {
     const wrapper = document.createElement("div");
@@ -188,7 +263,8 @@ document.addEventListener("DOMContentLoaded", () => {
     messageWrapper.dataset.isRenderingHeavyContent = 'false';
     messageWrapper.dataset.hasMermaid = 'false';
     messageWrapper.dataset.isMermaidPending = 'false';
-    
+    messageWrapper.dataset.isRenderingImage = 'false';
+
     const contentDiv = document.createElement("div");
     contentDiv.className = "prose prose-slate dark:prose-invert max-w-none px-4 pt-3 pb-1";
     contentDiv.innerHTML = `<p class="text-sm text-slate-500">Thinking...</p>`;
@@ -231,6 +307,9 @@ document.addEventListener("DOMContentLoaded", () => {
     let buffer = "";
     let hasMermaid = false;
     let hasCompleteMermaid = false;
+    let pendingImages = [];
+    let collectedImages = [];
+    let remainder = "";
 
     const markMermaidRendering = () => {
       if (!hasMermaid && containsMermaidFence(buffer)) {
@@ -243,6 +322,53 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     };
 
+    const renderBuffer = () => {
+      const rendered = md.render(buffer);
+      contentDiv.innerHTML = DOMPurify.sanitize(rendered, {
+        ADD_TAGS: ['button', 'svg', 'path', 'img'],
+        ADD_ATTR: [
+          'stroke',
+          'stroke-linecap',
+          'stroke-linejoin',
+          'stroke-width',
+          'd',
+          'viewBox',
+          'fill',
+          'data-mermaid-source',
+          'src',
+          'alt',
+          'title',
+          'loading',
+          'decoding',
+        ],
+      });
+      wrapMermaidDiagrams(contentDiv);
+      wrapGeneratedImages(contentDiv, messageWrapper, pendingImages);
+      if (hasMermaid) {
+        setRenderingState(messageWrapper, true);
+      }
+      runMermaid();
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    };
+
+    const handleTextDelta = (delta) => {
+      if (!delta) return;
+      buffer += delta;
+      markMermaidRendering();
+      renderBuffer();
+    };
+
+    const handleImageEvent = (payload) => {
+      if (!payload || !payload.url) return;
+      const altText = payload.alt_text || 'Generated image';
+      const markdown = payload.markdown || `\n\n![${altText}](${payload.url})\n`;
+      buffer += markdown;
+      pendingImages.push({ url: payload.url, alt_text: altText, status: 'pending' });
+      collectedImages.push({ url: payload.url, alt_text: altText });
+      messageWrapper.dataset.hasImages = 'true';
+      renderBuffer();
+    };
+
     try {
       const response = await fetch(`/chat/${sessionId}/stream?model=${encodeURIComponent(model || "")}`);
       const reader = response.body.getReader();
@@ -250,27 +376,53 @@ document.addEventListener("DOMContentLoaded", () => {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
-        markMermaidRendering();
-        const rendered = md.render(buffer);
-        contentDiv.innerHTML = DOMPurify.sanitize(rendered, {
-          ADD_TAGS: ['button', 'svg', 'path'],
-          ADD_ATTR: ['stroke', 'stroke-linecap', 'stroke-linejoin', 'stroke-width', 'd', 'viewBox', 'fill', 'data-mermaid-source']
-        });
-        wrapMermaidDiagrams(contentDiv);
-        if (hasMermaid) {
-          setRenderingState(messageWrapper, true);
+        remainder += decoder.decode(value, { stream: true });
+        const parts = remainder.split(/\n/);
+        remainder = parts.pop() || "";
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line) continue;
+          let payload;
+          try {
+            payload = JSON.parse(line);
+          } catch (err) {
+            console.debug('Failed to parse stream chunk', err);
+            continue;
+          }
+
+          switch (payload.type) {
+            case 'text_delta':
+              handleTextDelta(payload.text || '');
+              break;
+            case 'image':
+              handleImageEvent(payload);
+              break;
+            case 'error':
+              contentDiv.innerHTML = `<p class="text-sm text-red-500">${payload.message || 'Streaming error.'}</p>`;
+              break;
+            case 'text_done':
+              if (payload.text) {
+                buffer = payload.text;
+                markMermaidRendering();
+                renderBuffer();
+              }
+              if (Array.isArray(payload.images) && payload.images.length) {
+                collectedImages = payload.images;
+                pendingImages = payload.images.map((img) => ({ ...img, status: 'done' }));
+                wrapGeneratedImages(contentDiv, messageWrapper, pendingImages);
+              }
+              break;
+            default:
+              break;
+          }
         }
-        runMermaid();
-        messagesEl.scrollTop = messagesEl.scrollHeight;
       }
       // Ensure we didn't miss mermaid detection during streaming
       markMermaidRendering();
       const finalizeResponse = await fetch(`/chat/${sessionId}/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: buffer, model }),
+        body: JSON.stringify({ content: buffer, model, images: collectedImages }),
       });
       if (finalizeResponse.ok) {
         const data = await finalizeResponse.json();
@@ -278,6 +430,8 @@ document.addEventListener("DOMContentLoaded", () => {
         // Store the raw text in the message wrapper
         messageWrapper.setAttribute('data-raw-text', data.raw);
         wrapMermaidDiagrams(contentDiv);
+        pendingImages = collectedImages.map((img) => ({ ...img, status: 'done' }));
+        wrapGeneratedImages(contentDiv, messageWrapper, pendingImages);
         if (hasMermaid) {
           try {
             await runMermaid();
@@ -288,6 +442,7 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
           runMermaid();
         }
+        messageWrapper.dataset.isRenderingImage = 'false';
       } else {
         contentDiv.innerHTML = `<p class="text-sm text-red-500">Failed to save response.</p>`;
         if (hasMermaid) {
@@ -304,6 +459,8 @@ document.addEventListener("DOMContentLoaded", () => {
           setRenderingState(messageWrapper, false);
         }
       }
+      messageWrapper.dataset.isRenderingImage =
+        pendingImages.some((img) => img.status !== 'done') ? 'true' : 'false';
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
   };

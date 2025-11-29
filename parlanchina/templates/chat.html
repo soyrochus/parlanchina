@@ -84,7 +84,7 @@
             </div>
           {% else %}
             <div class="flex justify-start">
-              <div class="assistant-message-wrapper max-w-7xl rounded-2xl bg-white/80 dark:bg-slate-800/70 shadow-sm" data-raw-text="{{ message.raw_markdown | e }}">
+              <div class="assistant-message-wrapper max-w-7xl rounded-2xl bg-white/80 dark:bg-slate-800/70 shadow-sm" data-raw-text="{{ message.raw_markdown | e }}" data-is-rendering-image="false" data-has-images="{{ 'true' if message.images else 'false' }}">
                 <div class="prose prose-slate dark:prose-invert max-w-none px-4 pt-3 pb-1">
                   {{ message.html|safe }}
                 </div>

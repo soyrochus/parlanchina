@@ -1,6 +1,8 @@
 import html
 from typing import Iterable
 
+import html
+
 import bleach
 from markdown_it import MarkdownIt
 
@@ -58,6 +60,7 @@ def _sanitize(html_text: str) -> str:
         "button",
         "svg",
         "path",
+        "img",
     ]
     allowed_attrs = {
         "a": ["href", "title"],
@@ -67,6 +70,7 @@ def _sanitize(html_text: str) -> str:
         "button": ["class", "title", "style"],
         "svg": ["class", "fill", "stroke", "viewBox"],
         "path": ["stroke-linecap", "stroke-linejoin", "stroke-width", "d"],
+        "img": ["src", "alt", "title", "loading", "decoding"],
     }
     return bleach.clean(
         html_text,

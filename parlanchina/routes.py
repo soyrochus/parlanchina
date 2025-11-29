@@ -1,7 +1,7 @@
-import logging
 import asyncio
+import json
+import logging
 import threading
-from urllib.parse import quote
 
 from flask import (
     Blueprint,
@@ -15,7 +15,7 @@ from flask import (
     url_for,
 )
 
-from parlanchina.services import chat_store, llm
+from parlanchina.services import chat_store, image_store, llm
 
 bp = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
@@ -96,21 +96,61 @@ def stream_response(session_id: str):
 
     def generate():
         import asyncio
+        text_buffer = ""
+        images: list[dict[str, str]] = []
         # Get or create event loop for this thread
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        
+
         # Run the async generator in sync context
         async_gen = llm.stream_response(payload_messages, model)
         while True:
             try:
-                chunk = loop.run_until_complete(async_gen.__anext__())
-                yield chunk
+                event = loop.run_until_complete(async_gen.__anext__())
+                if event.type == "text_delta":
+                    delta = event.text or ""
+                    if delta:
+                        text_buffer += delta
+                        yield json.dumps({"type": "text_delta", "text": delta}) + "\n"
+                elif event.type == "image_call":
+                    if not event.image_b64:
+                        continue
+                    try:
+                        meta = image_store.save_image_from_base64(event.image_b64)
+                        alt_text = _derive_alt_text(event.image_params)
+                        image_payload = {"url": meta.url_path, "alt_text": alt_text}
+                        images.append(image_payload)
+                        addition = f"\n\n![{alt_text}]({meta.url_path})\n"
+                        text_buffer += addition
+                        yield (
+                            json.dumps(
+                                {
+                                    "type": "image",
+                                    "url": meta.url_path,
+                                    "alt_text": alt_text,
+                                    "markdown": addition,
+                                }
+                            )
+                            + "\n"
+                        )
+                    except Exception as exc:  # pragma: no cover - safety
+                        logger.exception("Failed to persist generated image: %s", exc)
+                        yield json.dumps({"type": "error", "message": "Image save failed"}) + "\n"
+                elif event.type == "error":
+                    yield (
+                        json.dumps({"type": "error", "message": event.text or "LLM error"})
+                        + "\n"
+                    )
+                elif event.type == "text_done":
+                    if event.text:
+                        if not text_buffer or len(event.text) > len(text_buffer):
+                            text_buffer = event.text
             except StopAsyncIteration:
                 break
+        yield json.dumps({"type": "text_done", "text": text_buffer, "images": images}) + "\n"
 
     headers = {
         "Cache-Control": "no-cache",
@@ -162,11 +202,19 @@ def finalize_message(session_id: str):
     data = request.get_json(force=True)
     content = data.get("content", "")
     model = data.get("model") or None
+    images = data.get("images") or []
     session = chat_store.load_session(session_id)
     if not session:
         abort(404)
-    message = chat_store.append_assistant_message(session_id, content, model=model)
+    message = chat_store.append_assistant_message(
+        session_id, content, model=model, images=images
+    )
     return jsonify({"status": "ok", "html": message["html"], "raw": message["raw_markdown"]})
+
+
+@bp.get("/images/<path:filename>")
+def serve_image(filename: str):
+    return image_store.serve_image(filename)
 
 
 def _resolve_model() -> str:
@@ -188,6 +236,16 @@ def _format_messages_for_model(session: dict) -> list[dict]:
             content = message.get("content") or ""
         formatted.append({"role": message["role"], "content": content})
     return formatted
+
+
+def _derive_alt_text(params: dict | None) -> str:
+    if not params:
+        return "Generated image"
+    for key in ("alt_text", "description", "prompt"):
+        value = params.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "Generated image"
 
 
 def _generate_session_title_async(session_id: str, user_message: str, model: str):

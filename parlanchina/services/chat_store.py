@@ -73,12 +73,24 @@ def append_user_message(session_id: str, content: str, *, model: str | None = No
     return session
 
 
-def append_assistant_message(session_id: str, content: str, *, model: str | None = None) -> dict:
+def append_assistant_message(
+    session_id: str,
+    content: str,
+    *,
+    model: str | None = None,
+    images: list[dict[str, str]] | None = None,
+) -> dict:
     session = load_session(session_id)
     if not session:
         raise FileNotFoundError(f"Session {session_id} not found")
     html = render_markdown(content)
-    message = {"role": "assistant", "raw_markdown": content, "html": html}
+    message = {
+        "role": "assistant",
+        "raw_markdown": content,
+        "html": html,
+    }
+    if images:
+        message["images"] = images
     session["messages"].append(message)
     session["updated_at"] = _now()
     if model:
