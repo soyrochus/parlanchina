@@ -65,20 +65,22 @@ def _extract_image_b64(payload: dict) -> tuple[Optional[str], dict]:
     image_params: dict = {}
 
     def _maybe_extract_image_obj(node: dict) -> Optional[str]:
-        # Common shape: {"data": "...", "format": "png"} or {"image": {"data": "..."}}
+        # Common shapes: {"data": "...", "format": "png"} or {"image": {"data": "..."}}
         if "data" in node and isinstance(node["data"], str) and node["data"].strip():
-          return node["data"]
+            return node["data"]
         if "image" in node and isinstance(node["image"], dict):
             inner = node["image"]
             if "data" in inner and isinstance(inner["data"], str) and inner["data"].strip():
                 return inner["data"]
             if "base64" in inner and isinstance(inner["base64"], str) and inner["base64"].strip():
                 return inner["base64"]
+        if "partial_image_b64" in node and isinstance(node["partial_image_b64"], str):
+            return node["partial_image_b64"]
         return None
 
     def _walk(node: Any) -> Optional[str]:
         if isinstance(node, dict):
-            for key in ("image_base64", "b64_json", "base64", "image"):
+            for key in ("image_base64", "b64_json", "base64", "image", "partial_image_b64"):
                 if key in node and isinstance(node[key], str) and node[key].strip():
                     return node[key]
             possible = _maybe_extract_image_obj(node)
@@ -140,6 +142,11 @@ async def stream_response(
                 logger.debug(
                     "LLM stream event: %s keys=%s", event_type, list(payload.keys())
                 )
+                if "partial_image_b64" in payload:
+                    logger.debug(
+                        "Partial image payload size=%s",
+                        len(payload.get("partial_image_b64") or ""),
+                    )
 
             # Look for image data on any event, even if the type label is unexpected
             image_b64, image_params = _extract_image_b64(payload)
