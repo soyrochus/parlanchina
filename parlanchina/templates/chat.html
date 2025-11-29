@@ -78,14 +78,14 @@
         {% for message in session.messages %}
           {% if message.role == 'user' %}
             <div class="flex justify-end">
-              <div class="max-w-3xl rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-4 py-3 shadow-sm">
+              <div class="max-w-7xl rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-4 py-3 shadow-sm">
                 <p class="whitespace-pre-wrap">{{ message.content }}</p>
               </div>
             </div>
           {% else %}
             <div class="flex justify-start">
-              <div class="assistant-message-wrapper max-w-3xl rounded-2xl bg-white/80 dark:bg-slate-800/70 shadow-sm" data-raw-text="{{ message.raw_markdown | e }}">
-                <div class="prose prose-slate dark:prose-invert px-4 pt-3 pb-1">
+              <div class="assistant-message-wrapper max-w-7xl rounded-2xl bg-white/80 dark:bg-slate-800/70 shadow-sm" data-raw-text="{{ message.raw_markdown | e }}">
+                <div class="prose prose-slate dark:prose-invert max-w-none px-4 pt-3 pb-1">
                   {{ message.html|safe }}
                 </div>
                 <div class="px-4 pb-3 pt-1 flex items-center">

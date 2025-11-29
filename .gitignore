@@ -15,3 +15,5 @@ wheels/
 # Local config/data
 .env
 data/
+backup/
+scratchpad.md

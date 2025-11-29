@@ -48,8 +48,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const runMermaid = () => {
     if (window.mermaid) {
-      window.mermaid.run();
+      return window.mermaid.run();
     }
+    return Promise.resolve();
   };
   
   const wrapMermaidDiagrams = (container) => {
@@ -85,7 +86,62 @@ document.addEventListener("DOMContentLoaded", () => {
       pre.parentNode.insertBefore(wrapper, pre);
       wrapper.appendChild(button);
       wrapper.appendChild(pre);
+      ensureRenderingOverlay(wrapper);
     });
+
+    // Ensure overlays exist for any pre-existing wrapped elements
+    container.querySelectorAll('.mermaid-container').forEach(wrapper => ensureRenderingOverlay(wrapper));
+    // Refresh overlay visibility if message state already tracked
+    const messageWrapper = container.closest('.assistant-message-wrapper');
+    if (messageWrapper) {
+      refreshOverlayVisibility(messageWrapper);
+    }
+  };
+
+  const containsMermaidFence = (text) => /```mermaid/i.test(text);
+  const hasCompleteMermaidBlock = (text) => /```mermaid[\s\S]*?```/i.test(text);
+
+  const ensureRenderingOverlay = (mermaidContainer) => {
+    if (!mermaidContainer) return null;
+    let overlay = mermaidContainer.querySelector('.rendering-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'rendering-overlay';
+      overlay.innerHTML = `
+        <div class="rendering-indicator">
+          <span class="rendering-dot"></span>
+          <span class="rendering-text">Rendering diagram...</span>
+        </div>
+      `;
+      mermaidContainer.appendChild(overlay);
+    }
+    return overlay;
+  };
+
+  const refreshOverlayVisibility = (messageWrapper) => {
+    if (!messageWrapper) return;
+    const isRendering = messageWrapper.dataset.isRenderingHeavyContent === 'true';
+    const isPending = messageWrapper.dataset.isMermaidPending === 'true';
+    const mermaidContainers = messageWrapper.querySelectorAll('.mermaid-container');
+    mermaidContainers.forEach(container => {
+      const overlay = ensureRenderingOverlay(container);
+      if (!overlay) return;
+      const shouldShow = isRendering || isPending;
+      overlay.classList.toggle('visible', shouldShow);
+      container.classList.toggle('rendering-pending', isPending);
+    });
+  };
+
+  const setRenderingState = (messageWrapper, isRendering) => {
+    if (!messageWrapper) return;
+    messageWrapper.dataset.isRenderingHeavyContent = isRendering ? 'true' : 'false';
+    refreshOverlayVisibility(messageWrapper);
+  };
+
+  const setMermaidPendingState = (messageWrapper, isPending) => {
+    if (!messageWrapper) return;
+    messageWrapper.dataset.isMermaidPending = isPending ? 'true' : 'false';
+    refreshOverlayVisibility(messageWrapper);
   };
 
   const checkForTitleUpdate = async (sessionId) => {
@@ -118,7 +174,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const appendUserBubble = (content) => {
     const wrapper = document.createElement("div");
     wrapper.className = "flex justify-end";
-    wrapper.innerHTML = `<div class="max-w-3xl rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-4 py-3 shadow-sm whitespace-pre-wrap">${escapeHtml(content)}</div>`;
+    wrapper.innerHTML = `<div class="max-w-7xl rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-4 py-3 shadow-sm whitespace-pre-wrap">${escapeHtml(content)}</div>`;
     messagesEl.appendChild(wrapper);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   };
@@ -128,10 +184,13 @@ document.addEventListener("DOMContentLoaded", () => {
     wrapper.className = "flex justify-start";
     
     const messageWrapper = document.createElement("div");
-    messageWrapper.className = "assistant-message-wrapper max-w-3xl rounded-2xl bg-white/80 dark:bg-slate-800/70 shadow-sm";
+    messageWrapper.className = "assistant-message-wrapper max-w-7xl rounded-2xl bg-white/80 dark:bg-slate-800/70 shadow-sm";
+    messageWrapper.dataset.isRenderingHeavyContent = 'false';
+    messageWrapper.dataset.hasMermaid = 'false';
+    messageWrapper.dataset.isMermaidPending = 'false';
     
     const contentDiv = document.createElement("div");
-    contentDiv.className = "prose prose-slate dark:prose-invert px-4 pt-3 pb-1";
+    contentDiv.className = "prose prose-slate dark:prose-invert max-w-none px-4 pt-3 pb-1";
     contentDiv.innerHTML = `<p class="text-sm text-slate-500">Thinking...</p>`;
     
     const footerDiv = document.createElement("div");
@@ -170,6 +229,20 @@ document.addEventListener("DOMContentLoaded", () => {
   const streamAssistant = async (sessionId, model) => {
     const { contentDiv, messageWrapper } = appendAssistantBubble();
     let buffer = "";
+    let hasMermaid = false;
+    let hasCompleteMermaid = false;
+
+    const markMermaidRendering = () => {
+      if (!hasMermaid && containsMermaidFence(buffer)) {
+        hasMermaid = true;
+        messageWrapper.dataset.hasMermaid = 'true';
+      }
+      if (hasMermaid) {
+        hasCompleteMermaid = hasCompleteMermaidBlock(buffer);
+        setMermaidPendingState(messageWrapper, !hasCompleteMermaid);
+      }
+    };
+
     try {
       const response = await fetch(`/chat/${sessionId}/stream?model=${encodeURIComponent(model || "")}`);
       const reader = response.body.getReader();
@@ -179,15 +252,21 @@ document.addEventListener("DOMContentLoaded", () => {
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
+        markMermaidRendering();
         const rendered = md.render(buffer);
         contentDiv.innerHTML = DOMPurify.sanitize(rendered, {
           ADD_TAGS: ['button', 'svg', 'path'],
           ADD_ATTR: ['stroke', 'stroke-linecap', 'stroke-linejoin', 'stroke-width', 'd', 'viewBox', 'fill', 'data-mermaid-source']
         });
         wrapMermaidDiagrams(contentDiv);
+        if (hasMermaid) {
+          setRenderingState(messageWrapper, true);
+        }
         runMermaid();
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
+      // Ensure we didn't miss mermaid detection during streaming
+      markMermaidRendering();
       const finalizeResponse = await fetch(`/chat/${sessionId}/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -199,17 +278,55 @@ document.addEventListener("DOMContentLoaded", () => {
         // Store the raw text in the message wrapper
         messageWrapper.setAttribute('data-raw-text', data.raw);
         wrapMermaidDiagrams(contentDiv);
-        runMermaid();
+        if (hasMermaid) {
+          try {
+            await runMermaid();
+          } finally {
+            setMermaidPendingState(messageWrapper, false);
+            setRenderingState(messageWrapper, false);
+          }
+        } else {
+          runMermaid();
+        }
       } else {
         contentDiv.innerHTML = `<p class="text-sm text-red-500">Failed to save response.</p>`;
+        if (hasMermaid) {
+          setMermaidPendingState(messageWrapper, false);
+          setRenderingState(messageWrapper, false);
+        }
       }
     } catch (err) {
       contentDiv.innerHTML = `<p class="text-sm text-red-500">Error streaming response.</p>`;
+    } finally {
+      if (hasMermaid) {
+        setMermaidPendingState(messageWrapper, false);
+        if (messageWrapper.dataset.isRenderingHeavyContent === 'true') {
+          setRenderingState(messageWrapper, false);
+        }
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
     }
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+  };
+
+  const triggerFormSubmit = () => {
+    if (!form) return;
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+    } else {
+      form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+    }
   };
 
   if (form) {
+    if (textarea) {
+      textarea.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          triggerFormSubmit();
+        }
+      });
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const sessionId = form.dataset.sessionId;
