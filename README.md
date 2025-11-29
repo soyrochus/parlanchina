@@ -10,19 +10,24 @@
 
 # Parlanchina
 
-> Where AI conversations come to play
-
-Minimal, demo-ready Flask chat UI that streams replies from an OpenAI-compatible backend. Single-user for now, architected to grow into multi-user later.
-
 ![Parlanchina logo](images/parlanchina-logo-small.png)
 
-Parlanchina intents to bridge the gap between quick prototypes and polished demos—giving you a clean, responsive UI that works as well in stakeholder presentations as it does in your development workflow. Built for developers who need to test AI integrations without compromising on user experience, and for teams who want demos that actually look demo-worthy.
+Parlanchina is a production-ready AI chat application built on Flask. It streams assistant replies, renders rich content, persists sessions locally, and is polished enough for real demos and everyday use.
 
-## What it Parlanchina provides
+## Feature highlights
 
-Parlanchina provides a complete chat interface with theme support, conversation management, and a responsive layout that adapts from mobile to ultrawide displays. Use it to validate your (Azure) OpenAI connections, MCP integrations, demonstrate capabilities to stakeholders, or as a foundation for your own chat applications.
-No compromises between functionality and presentation.
-
+- **Model selection**: Pick from your configured OpenAI/Azure models per session.
+- **Live streaming**: Incremental text rendering that mirrors the final saved output.
+- **Markdown-first**: GitHub-flavored markdown with sanitized HTML on both client and server.
+- **Mermaid diagrams**: ```mermaid blocks render with flicker-masking overlays plus zoom controls.
+- **Image generation**: OpenAI Responses image tool support with generation overlays, zoom, and persisted files under `data/images/`.
+- **Zoom anywhere**: Shared modal zoom for diagrams and generated images.
+- **Copy helpers**: One-click copy of raw assistant text from any message bubble.
+- **Keyboard flow**: Ctrl/Cmd+Enter to send; other Enter behavior remains unchanged.
+- **Local persistence**: JSON session storage in `data/sessions/`; images in `data/images/`.
+- **Theming**: Light/dark/system toggle; Mermaid re-renders to match the theme.
+- **Session management**: Sidebar list, rename/delete, and automatic title suggestions on the first user message.
+- **Safety surfacing**: Image-generation errors are shown in Markdown with a short LLM explanation.
 
 ![Parlanchine UI](images/parlanchina-ui.png)
 
@@ -106,55 +111,38 @@ Set these in `.env` (loaded via `python-dotenv`):
 - `PARLANCHINA_MODELS` — comma list of allowed models (e.g. `gpt-4o-mini,gpt-4o`)
 - `PARLANCHINA_DEFAULT_MODEL` — picked if user does not select one
 
-## Features
+## How to use (functional guide)
 
-- Async Flask routes with streamed responses via ASGI (Hypercorn)
-- JSON-backed chat persistence in `data/sessions/` behind a façade
-- Markdown rendering (server canonical + client preview) with sanitized HTML, Mermaid-ready blocks
-- Tailwind-based UI with theme toggle and model selector
+1. **Start a chat**  
+   Launch the app, pick or accept the default model. Sessions auto-save locally as you go.
 
-## Running the app
+2. **Send messages**  
+   - Type in the input box.  
+   - `Ctrl/Cmd+Enter` to send.  
+   - Enter behavior otherwise stays as-is.
 
-The app uses **Hypercorn** (ASGI server) to properly support async streaming routes.
+3. **View streamed replies**  
+   - Text streams live, then auto-saves to the session.  
+   - One-click copy grabs the raw assistant text for any message.
 
-**Recommended:** Use the startup scripts:
+4. **Render Markdown and Mermaid**  
+   - Paste or request fenced ```mermaid blocks.  
+   - A rendering overlay hides flicker/errors while diagrams finalize.  
+   - Click the zoom icon on diagrams to open them in the modal.
 
-macOS/Linux:
+5. **Generate images**  
+   - Ask for an image; the app invokes the OpenAI image tool.  
+   - While generating, an overlay and “Generating image…” label appear.  
+   - Images are stored under `data/images/`, referenced as Markdown, and reload with the session.  
+   - Use the zoom icon on images to view them in the modal.
 
-```bash
-./parlanchina.sh
-```
+6. **Switch themes**  
+   - Toggle light/dark/system; Mermaid diagrams re-render to match the theme.
 
-Windows (PowerShell):
-
-```powershell
-.\parlanchina.ps1
-```
-
-**Or run manually:**
-
-```bash
-uv run hypercorn parlanchina:app --bind 127.0.0.1:5000 --reload
-```
-
-The `--reload` flag enables auto-reload during development (like Flask's debug mode).
-
-## Project layout
-
-- `parlanchina/__init__.py` — app factory
-- `parlanchina/routes.py` — routes + streaming endpoints
-- `parlanchina/services/llm.py` — OpenAI/Azure Responses API wrapper
-- `parlanchina/services/chat_store.py` — JSON storage
-- `parlanchina/utils/markdown.py` — safe Markdown → HTML
-- `parlanchina/templates/` — Jinja templates
-- `parlanchina/static/js/` — theme + streaming handlers
-- `data/sessions/` — stored conversations
-
-## Notes
-
-- **ASGI required**: Flask's built-in server doesn't support async generators. Use Hypercorn or another ASGI server (uvicorn, daphne) for streaming.
-- Streaming protocol: user message POSTs to `/chat/<id>`, client opens `/chat/<id>/stream`, accumulates text, then POSTs `/chat/<id>/finalize` to persist rendered HTML.
-- Mermaid support: fenced ```mermaid blocks become `<pre class="mermaid">…</pre>` and are rendered on the client after streaming completes.
+7. **Manage sessions**  
+   - Sidebar lists conversations.  
+   - Rename or delete from the menu; first user message triggers an automatic title suggestion.  
+   - All chat history is kept in `data/sessions/` as JSON.
 
 
 ## Principles of Participation
