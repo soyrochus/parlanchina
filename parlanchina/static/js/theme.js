@@ -25,15 +25,32 @@
   const saved = localStorage.getItem(storageKey) || "system";
   applyTheme(saved);
 
+  // Backwards-compatible: support both button-based toggles and the new select.
   const toggleContainer = document.getElementById("theme-toggle");
   if (toggleContainer) {
+    // Buttons (legacy)
     toggleContainer.querySelectorAll("button[data-theme]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const choice = btn.dataset.theme;
         localStorage.setItem(storageKey, choice);
         applyTheme(choice);
+        // If a select exists, keep it in sync
+        const sel = document.getElementById('theme-select');
+        if (sel) sel.value = choice;
       });
     });
+
+    // Select (new)
+    const select = document.getElementById('theme-select');
+    if (select) {
+      // Initialize select to saved value
+      select.value = saved;
+      select.addEventListener('change', (e) => {
+        const choice = e.target.value;
+        localStorage.setItem(storageKey, choice);
+        applyTheme(choice);
+      });
+    }
   }
 
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {

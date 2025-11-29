@@ -4,14 +4,22 @@
 <div class="flex flex-1 overflow-hidden">
   <aside class="hidden md:flex w-72 flex-col border-r border-slate-200/80 bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/50">
     <div class="flex items-center justify-between px-4 py-4">
-      <div>
-        <p class="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Parlanchina</p>
-        <p class="text-lg font-display font-semibold">Chats</p>
+      <div class="flex items-center gap-3">
+        <a href="/" class="flex items-center">
+          <img src="/static/images/logo.png" alt="Parlanchina logo" class="w-8 h-8 rounded" />
+        </a>
+        <div>
+          <p class="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Parlanchina</p>
+          <p class="text-lg font-display font-semibold">Chats</p>
+        </div>
       </div>
-      <div class="flex gap-2" id="theme-toggle">
-        <button class="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs" data-theme="light">Light</button>
-        <button class="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs" data-theme="dark">Dark</button>
-        <button class="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs" data-theme="system">System</button>
+      <div class="flex items-center" id="theme-toggle">
+        <label for="theme-select" class="sr-only">Theme</label>
+        <select id="theme-select" class="rounded-lg border border-slate-200 bg-white px-3 py-1 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50">
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+          <option value="system">System</option>
+        </select>
       </div>
     </div>
     <div class="px-4">
