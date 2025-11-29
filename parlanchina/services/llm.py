@@ -135,6 +135,7 @@ async def stream_response(
             tools=tools,
         )
         accumulated_text = ""
+        sent_image_start = False
         async for event in stream:
             payload = _event_to_dict(event)
             if logger.isEnabledFor(logging.DEBUG):
@@ -147,6 +148,15 @@ async def stream_response(
                         "Partial image payload size=%s",
                         len(payload.get("partial_image_b64") or ""),
                     )
+
+            # Signal image generation start even before final base64 arrives
+            if (
+                not sent_image_start
+                and isinstance(getattr(event, "type", ""), str)
+                and "image_generation_call" in event.type
+            ):
+                sent_image_start = True
+                yield LLMEvent(type="image_start", raw_event=event)
 
             # Look for image data on any event, even if the type label is unexpected
             image_b64, image_params = _extract_image_b64(payload)

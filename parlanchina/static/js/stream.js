@@ -276,6 +276,7 @@ document.addEventListener("DOMContentLoaded", () => {
     messageWrapper.dataset.hasMermaid = 'false';
     messageWrapper.dataset.isMermaidPending = 'false';
     messageWrapper.dataset.isRenderingImage = 'false';
+    messageWrapper.dataset.imageIndicatorShown = 'false';
 
     const contentDiv = document.createElement("div");
     contentDiv.className = "prose prose-slate dark:prose-invert max-w-none px-4 pt-3 pb-1";
@@ -336,7 +337,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const renderBuffer = () => {
       const rendered = md.render(buffer);
-      contentDiv.innerHTML = DOMPurify.sanitize(rendered, {
+      const safeHtml = DOMPurify.sanitize(rendered, {
         ADD_TAGS: ['button', 'svg', 'path', 'img'],
         ADD_ATTR: [
           'stroke',
@@ -354,6 +355,13 @@ document.addEventListener("DOMContentLoaded", () => {
           'decoding',
         ],
       });
+      const showImageIndicator =
+        messageWrapper.dataset.imageIndicatorShown === 'true' &&
+        messageWrapper.dataset.isRenderingImage === 'true';
+      const prefix = showImageIndicator
+        ? '<p class="text-sm text-slate-500 mb-2">Generating image...</p>'
+        : '';
+      contentDiv.innerHTML = prefix + safeHtml;
       wrapMermaidDiagrams(contentDiv);
       wrapGeneratedImages(contentDiv, messageWrapper, pendingImages);
       if (hasMermaid) {
@@ -374,6 +382,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!payload || !payload.url) return;
       const altText = payload.alt_text || 'Generated image';
       const markdown = payload.markdown || `\n\n![${altText}](${payload.url})\n`;
+      if (messageWrapper.dataset.imageIndicatorShown !== 'true') {
+        messageWrapper.dataset.imageIndicatorShown = 'true';
+      }
       buffer += markdown;
       pendingImages.push({ url: payload.url, alt_text: altText, status: 'pending' });
       collectedImages.push({ url: payload.url, alt_text: altText });
@@ -406,6 +417,11 @@ document.addEventListener("DOMContentLoaded", () => {
           switch (payload.type) {
             case 'text_delta':
               handleTextDelta(payload.text || '');
+              break;
+            case 'image_start':
+              messageWrapper.dataset.imageIndicatorShown = 'true';
+              messageWrapper.dataset.isRenderingImage = 'true';
+              renderBuffer();
               break;
             case 'image':
               handleImageEvent(payload);

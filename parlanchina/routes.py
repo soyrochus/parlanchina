@@ -117,6 +117,8 @@ def stream_response(session_id: str):
                         if delta:
                             text_buffer += delta
                             yield json.dumps({"type": "text_delta", "text": delta}) + "\n"
+                    elif event.type == "image_start":
+                        yield json.dumps({"type": "image_start"}) + "\n"
                     elif event.type == "image_call":
                         if not event.image_b64:
                             continue
