@@ -142,8 +142,42 @@ def stream_response(session_id: str):
                             logger.exception("Failed to persist generated image: %s", exc)
                             yield json.dumps({"type": "error", "message": "Image save failed"}) + "\n"
                     elif event.type == "error":
+                        error_message = event.text or "LLM error"
+                        analysis = ""
+                        try:
+                            analysis_prompt = [
+                                {
+                                    "role": "system",
+                                    "content": "You are a helpful assistant that explains model or tool errors succinctly for end users. Provide a brief, calm summary and a likely cause/next step.",
+                                },
+                                {
+                                    "role": "user",
+                                    "content": f"Explain this image-generation error for the user in 2-3 sentences:\n\n{error_message}",
+                                },
+                            ]
+                            analysis = loop.run_until_complete(
+                                llm.complete_response(analysis_prompt, model)
+                            )
+                        except Exception as exc:  # pragma: no cover
+                            logger.exception("Failed to analyze error via LLM: %s", exc)
+                            analysis = ""
+
+                        markdown_error = (
+                            "\n\n**Image generation failed**\n\n"
+                            f"```\n{error_message}\n```\n"
+                        )
+                        if analysis:
+                            markdown_error += f"\n{analysis}\n"
+                        text_buffer += markdown_error
                         yield (
-                            json.dumps({"type": "error", "message": event.text or "LLM error"})
+                            json.dumps(
+                                {
+                                    "type": "error",
+                                    "message": error_message,
+                                    "analysis": analysis,
+                                    "markdown": markdown_error,
+                                }
+                            )
                             + "\n"
                         )
                     elif event.type == "text_done":
