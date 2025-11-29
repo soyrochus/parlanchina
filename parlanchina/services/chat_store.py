@@ -73,18 +73,48 @@ def append_user_message(session_id: str, content: str, *, model: str | None = No
     return session
 
 
-def append_assistant_message(session_id: str, content: str, *, model: str | None = None) -> dict:
+def append_assistant_message(
+    session_id: str,
+    content: str,
+    *,
+    model: str | None = None,
+    images: list[dict[str, str]] | None = None,
+) -> dict:
     session = load_session(session_id)
     if not session:
         raise FileNotFoundError(f"Session {session_id} not found")
     html = render_markdown(content)
-    message = {"role": "assistant", "raw_markdown": content, "html": html}
+    message = {
+        "role": "assistant",
+        "raw_markdown": content,
+        "html": html,
+    }
+    if images:
+        message["images"] = images
     session["messages"].append(message)
     session["updated_at"] = _now()
     if model:
         session["model"] = model
     _save_session(session)
     return message
+
+
+def update_session_title(session_id: str, title: str) -> None:
+    """Update the title of an existing session."""
+    session = load_session(session_id)
+    if not session:
+        raise FileNotFoundError(f"Session {session_id} not found")
+    session["title"] = title
+    session["updated_at"] = _now()
+    _save_session(session)
+
+
+def delete_session(session_id: str) -> None:
+    """Delete a session file."""
+    path = _session_path(session_id)
+    if not path.exists():
+        raise FileNotFoundError(f"Session {session_id} not found")
+    path.unlink()
 
 
 def _save_session(session: dict[str, Any]) -> None:

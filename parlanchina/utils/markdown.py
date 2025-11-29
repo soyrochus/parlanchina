@@ -1,6 +1,8 @@
 import html
 from typing import Iterable
 
+import html
+
 import bleach
 from markdown_it import MarkdownIt
 
@@ -17,7 +19,7 @@ def _build_renderer() -> MarkdownIt:
         info = (token.info or "").strip()
         if info == "mermaid":
             content = html.escape(token.content)
-            return f'<pre class="mermaid">{content}</pre>'
+            return f'<div class="mermaid-container"><button class="mermaid-zoom-btn" title="Zoom diagram"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg></button><pre class="mermaid" data-mermaid-source="{content}">{content}</pre></div>'
         if fence:
             return fence(tokens, idx, options, env)
         return ""
@@ -55,12 +57,20 @@ def _sanitize(html_text: str) -> str:
         "th",
         "td",
         "div",
+        "button",
+        "svg",
+        "path",
+        "img",
     ]
     allowed_attrs = {
         "a": ["href", "title"],
         "code": ["class"],
-        "pre": ["class"],
-        "div": ["class"],
+        "pre": ["class", "data-mermaid-source"],
+        "div": ["class", "style"],
+        "button": ["class", "title", "style"],
+        "svg": ["class", "fill", "stroke", "viewBox"],
+        "path": ["stroke-linecap", "stroke-linejoin", "stroke-width", "d"],
+        "img": ["src", "alt", "title", "loading", "decoding"],
     }
     return bleach.clean(
         html_text,

@@ -1,22 +1,6 @@
 {
   "servers": [
     {
-      "name": "demo-openapi",
-      "description": "Demo OpenAPI server",
-      "transport": {
-        "type": "stdio",
-        "command": "uvx",
-        "args": ["awslabs.openapi-mcp-server@latest"],
-        "env": {
-          "API_NAME": "demo-api",
-          "API_BASE_URL": "http://localhost:8000/api",
-          "API_SPEC_URL": "http://localhost:8000/api/docs.json",
-          "LOG_LEVEL": "ERROR",
-          "ENABLE_OPERATION_PROMPTS": "true"
-        }
-      }
-    },
-    {
       "name": "postgres",
       "description": "Example Postgres MCP server",
       "transport": {

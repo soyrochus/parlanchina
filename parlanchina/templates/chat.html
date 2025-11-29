@@ -4,14 +4,22 @@
 <div class="flex flex-1 overflow-hidden">
   <aside class="hidden md:flex w-72 flex-col border-r border-slate-200/80 bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/50">
     <div class="flex items-center justify-between px-4 py-4">
-      <div>
-        <p class="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Parlanchina</p>
-        <p class="text-lg font-display font-semibold">Chats</p>
+      <div class="flex items-center gap-3">
+        <a href="/" class="flex items-center">
+          <img src="/static/images/logo.png" alt="Parlanchina logo" class="w-8 h-8 rounded" />
+        </a>
+        <div>
+          <p class="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Parlanchina</p>
+          <p class="text-lg font-display font-semibold">Chats</p>
+        </div>
       </div>
-      <div class="flex gap-2" id="theme-toggle">
-        <button class="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs" data-theme="light">Light</button>
-        <button class="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs" data-theme="dark">Dark</button>
-        <button class="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs" data-theme="system">System</button>
+      <div class="flex items-center" id="theme-toggle">
+        <label for="theme-select" class="sr-only">Theme</label>
+        <select id="theme-select" class="rounded-lg border border-slate-200 bg-white px-3 py-1 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50">
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+          <option value="system">System</option>
+        </select>
       </div>
     </div>
     <div class="px-4">
@@ -22,11 +30,31 @@
     <div class="mt-4 flex-1 overflow-y-auto px-2">
       <ul class="space-y-1">
         {% for s in sessions %}
-        <li>
+        <li class="session-item group relative" data-session-id="{{ s.id }}">
           <a href="{{ url_for('main.chat', session_id=s.id) }}" class="block rounded-lg px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 {% if s.id == session.id %}bg-slate-100 dark:bg-slate-800{% endif %}">
-            <p class="font-medium truncate">{{ s.title }}</p>
+            <p class="font-medium truncate session-title">{{ s.title }}</p>
             <p class="text-xs text-slate-500 dark:text-slate-400">{{ s.updated_at }}</p>
           </a>
+          <button class="session-menu-trigger absolute right-2 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700" data-session-id="{{ s.id }}">
+            <span class="text-slate-500 dark:text-slate-400 text-sm">⋯</span>
+          </button>
+          <div class="session-menu absolute right-2 top-8 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg z-10 hidden">
+            <div class="flex">
+              <button class="rename-btn px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-700 rounded-l-lg" data-session-id="{{ s.id }}">
+                Rename
+              </button>
+              <button class="delete-btn px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-700 rounded-r-lg text-red-600 dark:text-red-400" data-session-id="{{ s.id }}">
+                Delete
+              </button>
+            </div>
+          </div>
+          <div class="rename-input-container absolute inset-0 bg-white dark:bg-slate-800 rounded-lg hidden">
+            <input type="text" class="rename-input w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm" data-session-id="{{ s.id }}" />
+            <div class="flex gap-1 mt-1">
+              <button class="rename-save text-xs px-2 py-1 bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded" data-session-id="{{ s.id }}">Save</button>
+              <button class="rename-cancel text-xs px-2 py-1 border border-slate-300 dark:border-slate-600 rounded" data-session-id="{{ s.id }}">Cancel</button>
+            </div>
+          </div>
         </li>
         {% endfor %}
       </ul>
@@ -54,21 +82,42 @@
     </header>
 
     <section id="messages" class="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-      {% for message in session.messages %}
-        {% if message.role == 'user' %}
-          <div class="flex justify-end">
-            <div class="max-w-3xl rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-4 py-3 shadow-sm">
-              <p class="whitespace-pre-wrap">{{ message.content }}</p>
+      {% if session.messages %}
+        {% for message in session.messages %}
+          {% if message.role == 'user' %}
+            <div class="flex justify-end">
+              <div class="max-w-7xl rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-4 py-3 shadow-sm">
+                <p class="whitespace-pre-wrap">{{ message.content }}</p>
+              </div>
             </div>
-          </div>
-        {% else %}
-          <div class="flex justify-start">
-            <div class="prose prose-slate dark:prose-invert max-w-3xl rounded-2xl bg-white/80 dark:bg-slate-800/70 px-4 py-3 shadow-sm">
-              {{ message.html|safe }}
+          {% else %}
+            <div class="flex justify-start">
+              <div class="assistant-message-wrapper max-w-7xl rounded-2xl bg-white/80 dark:bg-slate-800/70 shadow-sm" data-raw-text="{{ message.raw_markdown | e }}" data-is-rendering-image="false" data-has-images="{{ 'true' if message.images else 'false' }}">
+                <div class="prose prose-slate dark:prose-invert max-w-none px-4 pt-3 pb-1">
+                  {{ message.html|safe }}
+                </div>
+                <div class="px-4 pb-3 pt-1 flex items-center">
+                  <button class="copy-btn text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors" title="Copy to clipboard">
+                    <svg class="copy-icon w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                    </svg>
+                    <svg class="check-icon w-4 h-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <div class="flex items-center justify-center h-full text-center">
+          <div class="text-slate-500 dark:text-slate-400">
+            <p class="text-lg font-medium mb-2">Start a new conversation</p>
+            <p class="text-sm">Send a message to begin chatting.</p>
           </div>
-        {% endif %}
-      {% endfor %}
+        </div>
+      {% endif %}
     </section>
 
     <section id="mcp-panel" data-session-id="{{ session.id }}" class="border-t border-slate-200/80 bg-white/70 px-4 py-4 dark:border-slate-800 dark:bg-slate-900/60">
