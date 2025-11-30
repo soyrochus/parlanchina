@@ -84,6 +84,25 @@ def _load_config() -> dict[str, _ServerConfig]:
         return {}
 
     servers_blob = raw_config.get("servers")
+    if isinstance(servers_blob, dict):
+        normalized = []
+        for name, server_cfg in servers_blob.items():
+            if not isinstance(server_cfg, dict):
+                continue
+            entry: dict[str, Any] = {"name": name}
+            if isinstance(server_cfg.get("description"), str):
+                entry["description"] = server_cfg["description"]
+            entry["transport"] = server_cfg.get("transport") or {
+                "type": server_cfg.get("type", "stdio"),
+                "command": server_cfg.get("command"),
+                "args": server_cfg.get("args"),
+                "env": server_cfg.get("env"),
+                "url": server_cfg.get("url"),
+                "headers": server_cfg.get("headers"),
+            }
+            normalized.append(entry)
+        servers_blob = normalized
+        logger.info("Loaded MCP config using map-style servers format")
     if servers_blob is None and isinstance(raw_config.get("mcpServers"), dict):
         servers_blob = [
             {
@@ -123,6 +142,15 @@ def _parse_server(entry: dict[str, Any]) -> Optional[_ServerConfig]:
         return None
     name = entry.get("name")
     transport = entry.get("transport")
+    if transport is None and entry.get("type"):
+        transport = {
+            "type": entry.get("type"),
+            "command": entry.get("command"),
+            "args": entry.get("args"),
+            "env": entry.get("env"),
+            "url": entry.get("url"),
+            "headers": entry.get("headers"),
+        }
     description = entry.get("description") if isinstance(entry.get("description"), str) else None
 
     if not isinstance(name, str) or not isinstance(transport, dict):

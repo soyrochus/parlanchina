@@ -1,20 +1,16 @@
 {
-  "servers": [
-    {
-      "name": "postgres",
-      "description": "Example Postgres MCP server",
-      "transport": {
-        "type": "stdio",
-        "command": "/home/iwk/.nvm/versions/node/v24.10.0/bin/mcp-postgres",
-        "args": [],
-        "env": {
-          "PG_HOST": "localhost",
-          "PG_PORT": "5433",
-          "PG_USER": "main",
-          "PG_PASSWORD": "main",
-          "PG_DATABASE": "main"
-        }
+  "servers": {
+     "postgres": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-postgres-server"],
+      "env": {
+        "PG_HOST": "localhost",
+        "PG_PORT": "5433",
+        "PG_USER": "main",
+        "PG_PASSWORD": "main",
+        "PG_DATABASE": "main"
       }
     }
-  ]
+  }
 }

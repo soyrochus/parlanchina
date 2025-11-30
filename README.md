@@ -120,30 +120,28 @@ Logging defaults to console (`LOG_TYPE=stream`) with a timestamped format. Raise
 
 ### MCP configuration
 
-Parlanchina connects to MCP servers via [FastMCP](https://pypi.org/project/fastmcp/). Add `fastmcp` to your environment (e.g., `uv add fastmcp`) and use the provided `mcp.json` (PostgreSQL MCP server preconfigured), or replace it with your own:
+Parlanchina connects to MCP servers via [FastMCP](https://pypi.org/project/fastmcp/). Add `fastmcp` to your environment (e.g., `uv add fastmcp`) and use the provided `mcp.json` (PostgreSQL MCP server preconfigured), or replace it with your own. The `servers` object maps server names to their config; each entry supplies `type`, `command`, `args`, and `env` for stdio transports (or `url`/`headers` for SSE):
 
 ```json
 {
-  "servers": [
-    {
-      "name": "demo-openapi",
-      "description": "Demo OpenAPI server",
-      "transport": {
-        "type": "stdio",
-        "command": "uvx",
-        "args": ["awslabs.openapi-mcp-server@latest"],
-        "env": { "API_BASE_URL": "http://localhost:8000/api" }
-      }
-    },
-    {
-      "name": "remote-sse",
-      "transport": {
-        "type": "sse",
-        "url": "https://example.com/mcp/sse",
-        "headers": { "Authorization": "Bearer <token>" }
+  "servers": {
+    "postgres": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "postgres-mcp",
+        "--access-mode=unrestricted"
+      ],
+      "env": {
+        "PG_HOST": "localhost",
+        "PG_PORT": "5433",
+        "PG_USER": "main",
+        "PG_PASSWORD": "main",
+        "PG_DATABASE": "main"
       }
     }
-  ]
+  }
 }
 ```
 
