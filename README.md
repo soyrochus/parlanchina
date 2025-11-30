@@ -150,6 +150,17 @@ Parlanchina connects to MCP servers via [FastMCP](https://pypi.org/project/fastm
 - Enable/disable tools per session via the Toolbox panel; only applied tools are exposed to the model.
 - Tool calls are driven by the model and streamed back into the transcript.
 
+### Ask mode vs. Agent mode
+
+Parlanchina supports two execution modes:
+
+- **Ask mode** (default): single-shot response. Only internal tools (e.g., image generation) are available, and MCP tools are excluded.
+- **Agent mode**: multi-step tool orchestration. Both internal and MCP tools are available (based on your Toolbox selection). The agent loops model → tool calls → model until it finishes or hits limits.
+
+![Toolbox](images/toolbox.png)
+
+You can switch modes and select tools in the Toolbox (above the input). Only the applied selection for the current session is used in LLM calls.
+
 ## How to use (functional guide)
 
 1. **Start a chat**  
