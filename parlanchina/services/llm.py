@@ -253,17 +253,58 @@ async def _stream_agent_mode(
     tool_payloads, tool_name_map = await _build_agent_tool_payloads(
         enabled_internal_ids=enabled_internal, enabled_mcp_ids=enabled_mcp
     )
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Agent loop start: internal=%s mcp=%s", sorted(enabled_internal), sorted(enabled_mcp))
+        logger.debug("Agent tool payloads: %s", [p.get("function", {}).get("name") for p in tool_payloads])
     allowed_names = set(tool_name_map.keys())
     tool_results: list[str] = []
+    last_structured: list[dict[str, Any]] = []
+    conversation = _format_input(messages)
+
+    # Plan step: ask the model for a brief plan before executing tools.
+    try:
+        available_tool_names = ", ".join(sorted(p.get("function", {}).get("name", "") for p in tool_payloads))
+        plan_prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "Given the user request, produce a brief, numbered plan of tool actions to complete it. "
+                    "Keep it concise (1-3 steps). Available tools this turn: "
+                    f"{available_tool_names or 'none'}. "
+                    "Use only these tools for data/actions; do not invent other tools or browsing. "
+                    "If no tools are needed, state that. Do not execute tools here."
+                ),
+            },
+            {
+                "role": "user",
+                "content": messages[-1].get("content", "") if messages else "",
+            },
+        ]
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Plan prompt tools=%s user=%s", available_tool_names, plan_prompt[-1]["content"])
+        plan_resp = await complete_response(plan_prompt, model)
+        if plan_resp:
+            conversation.insert(
+                0,
+                {
+                    "role": "assistant",
+                    "content": f"Plan:\n{plan_resp}",
+                },
+            )
+            logger.debug("Plan response: %s", plan_resp)
+    except Exception:
+        # Planning is best-effort; continue if it fails.
+        logger.debug("Plan step failed; continuing without plan", exc_info=True)
+        pass
     if not tool_payloads:
         # No valid tools resolved; fall back to plain completion.
+        logger.debug("No tool payloads; falling back to plain completion")
         final_text = await complete_response(messages, model)
         for chunk in _yield_text_chunks(final_text):
             yield LLMEvent(type="text_delta", text=chunk)
         yield LLMEvent(type="text_done", text=final_text)
         return
 
-    conversation = _format_input(messages)
     if tool_payloads:
         tool_list = ", ".join(sorted(tool_name_map.keys()))
         conversation = [
@@ -272,7 +313,10 @@ async def _stream_agent_mode(
                 "content": (
                     "You can call the available tools to fetch or modify data when it helps answer the user. "
                     f"Tools enabled for this turn: {tool_list}. "
-                    "Call a tool when you need external data or actions; otherwise answer directly."
+                    "Call a tool when you need data or actions; otherwise answer directly. "
+                    "When you return tool results, clearly surface the important fields in plain text (e.g., `Title: ...`, `Summary: ...`) before continuing. "
+                    "If you both fetch data and generate media (like images), present the fetched fields first, then the media prompt/output. "
+                    "Do not state that you lack web access; rely on the provided tools for data retrieval."
                 ),
             }
         ] + conversation
@@ -311,6 +355,7 @@ async def _stream_agent_mode(
                 call = _tool_call_to_dict(tc)
                 tool_name = call.get("function", {}).get("name") or ""
                 args = _parse_tool_args(call.get("function", {}).get("arguments"))
+                logger.debug("Tool call requested: %s args=%s", tool_name, args)
                 # Accept both safe names and full ids from the model
                 resolved_tool_id = tool_name_map.get(tool_name) or (
                     tool_name if tool_name in tool_name_map.values() else None
@@ -329,7 +374,11 @@ async def _stream_agent_mode(
                         result_text = f"Tool {tool_name} is disabled for this turn."
                     else:
                         result_text = await _run_mcp_tool(resolved_tool_id, args)
+                logger.debug("Tool call result for %s: %s", tool_name, result_text[:500])
                 tool_results.append(result_text)
+                parsed_structured = _unwrap_tool_result(result_text)
+                if parsed_structured:
+                    last_structured.extend(parsed_structured)
                 conversation.append(
                     {
                         "role": "tool",
@@ -341,17 +390,132 @@ async def _stream_agent_mode(
             continue
 
         final_text = message.content or ""
-        for chunk in _yield_text_chunks(final_text):
-            yield LLMEvent(type="text_delta", text=chunk)
-        yield LLMEvent(type="text_done", text=final_text)
+        if final_text:
+            for chunk in _yield_text_chunks(final_text):
+                yield LLMEvent(type="text_delta", text=chunk)
+            yield LLMEvent(type="text_done", text=final_text)
+            return
+
+    # If we reach here, we didn't get a final answer. Ask the model to summarize tool results.
+    if tool_results:
+        # Prefer structured extracts; otherwise, prefer non-error results; fall back to all results.
+        summary_sources: list[str] = []
+        if last_structured:
+            try:
+                summary_sources.append(json.dumps(last_structured, indent=2))
+            except Exception:
+                pass
+        if not summary_sources:
+            non_error = [r for r in tool_results if "failed to run" not in r.lower() and "error" not in r.lower()]
+            if non_error:
+                summary_sources = non_error
+        if not summary_sources:
+            summary_sources = tool_results
+
+        # Pull the last user request to provide context.
+        last_user = next((m.get("content") for m in reversed(messages) if m.get("role") == "user"), "")
+        logger.debug("Summarization fallback: last_user=%s sources_count=%s", last_user, len(summary_sources))
+
+        # Try one final turn with tools to allow finishing (including media generation).
+        final_conversation = [
+            {
+                "role": "system",
+                "content": (
+                    "Provide a final answer to the user's request using the tool results below. "
+                    "Clearly list key fields (e.g., Title, Description) and, if applicable, generate requested media via the available tools. "
+                    "Ignore failed or irrelevant tool attempts."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"User request: {last_user}\n\nTool results:\n" + "\n\n".join(summary_sources),
+            },
+        ]
+
+        for _ in range(2):
+            try:
+                resp = await client.chat.completions.create(
+                    model=model,
+                    messages=final_conversation,
+                    tools=tool_payloads,
+                    tool_choice="auto",
+                )
+            except Exception:
+                break
+
+            choice = (resp.choices or [None])[0]
+            msg = getattr(choice, "message", None)
+            if not msg:
+                continue
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            if tool_calls:
+                assistant_msg = {
+                    "role": "assistant",
+                    "content": msg.content or "",
+                    "tool_calls": [_tool_call_to_dict(tc) for tc in tool_calls],
+                }
+                final_conversation.append(assistant_msg)
+                for tc in tool_calls:
+                    call = _tool_call_to_dict(tc)
+                    tool_name = call.get("function", {}).get("name") or ""
+                    args = _parse_tool_args(call.get("function", {}).get("arguments"))
+                    resolved_tool_id = tool_name_map.get(tool_name) or (
+                        tool_name if tool_name in tool_name_map.values() else None
+                    )
+                    allowed = tool_name in allowed_names or tool_name in tool_name_map.values()
+                    if not resolved_tool_id or not allowed:
+                        result_text = f"Tool {tool_name} is disabled for this turn."
+                    elif resolved_tool_id.startswith("internal."):
+                        if resolved_tool_id not in enabled_internal:
+                            result_text = f"Tool {tool_name} is disabled for this turn."
+                        else:
+                            result_text = await _run_internal_tool(resolved_tool_id, args)
+                    else:
+                        if resolved_tool_id not in enabled_mcp:
+                            result_text = f"Tool {tool_name} is disabled for this turn."
+                        else:
+                            result_text = await _run_mcp_tool(resolved_tool_id, args)
+                    tool_results.append(result_text)
+                    final_conversation.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id") or "",
+                            "content": result_text,
+                            "name": tool_name or None,
+                        }
+                    )
+                continue
+
+            final_text = msg.content or ""
+            if final_text:
+                for chunk in _yield_text_chunks(final_text):
+                    yield LLMEvent(type="text_delta", text=chunk)
+                yield LLMEvent(type="text_done", text=final_text)
+                return
+
+        # If still nothing, fall back to a concise summary without tools.
+        summary_prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "Provide a final answer to the user's request using the tool results below. "
+                    "Clearly list key fields (e.g., Title, Description) and, if applicable, the requested media prompt/output. "
+                    "Ignore earlier failed or irrelevant tool attempts."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"User request: {last_user}\n\nTool results:\n" + "\n\n".join(summary_sources),
+            },
+        ]
+        summary_text = await complete_response(summary_prompt, model)
+        yield LLMEvent(type="text_done", text=summary_text)
         return
 
-    fallback_text = (
-        tool_results[-1]
-        if tool_results
-        else "Tool call loop ended without a final response. Please try again or adjust your request."
+    yield LLMEvent(
+        type="text_done",
+        text="Tool call loop ended without a final response. Please try again or adjust your request.",
     )
-    yield LLMEvent(type="text_done", text=fallback_text)
 
 
 async def _build_agent_tool_payloads(
@@ -479,6 +643,35 @@ def _parse_tool_args(raw_args: Any) -> dict:
         except json.JSONDecodeError:
             return {}
     return {}
+
+
+def _unwrap_tool_result(raw: str) -> list[dict[str, Any]]:
+    """Best-effort to extract structured rows from a tool result string."""
+    if not raw or "text='" not in raw:
+        return []
+    # Extract the first text='...' segment
+    try:
+        start = raw.index("text='") + len("text='")
+        end = raw.find("'", start)
+        if end == -1:
+            return []
+        candidate = raw[start:end]
+        # Unescape common sequences
+        candidate = candidate.replace("\\n", "\n").replace("\\\"", '"').replace("\\'", "'")
+        # If it looks like a JSON array or object, try to parse
+        candidate_stripped = candidate.strip()
+        if candidate_stripped.startswith("[") or candidate_stripped.startswith("{"):
+            try:
+                parsed = json.loads(candidate_stripped)
+                if isinstance(parsed, list):
+                    return parsed
+                if isinstance(parsed, dict):
+                    return [parsed]
+            except Exception:
+                return []
+    except Exception:
+        return []
+    return []
 
 
 def _yield_text_chunks(text: str, chunk_size: int = 200) -> List[str]:
