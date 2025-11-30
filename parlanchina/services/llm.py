@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from openai import AsyncAzureOpenAI, AsyncOpenAI, OpenAIError
 
-from parlanchina.services import mcp_manager
+from parlanchina.services import image_store, internal_tools, mcp_manager
 
 logger = logging.getLogger(__name__)
 
@@ -110,16 +110,35 @@ def _extract_image_b64(payload: dict) -> tuple[Optional[str], dict]:
 async def stream_response(
     messages: List[dict],
     model: str,
-    enable_image_tool: bool = True,
-    enabled_tools: Optional[List[str]] = None,
+    mode: str,
+    internal_tools: Optional[List[str]] = None,
+    mcp_tools: Optional[List[str]] = None,
 ) -> AsyncIterator[LLMEvent]:
-    """Stream assistant text and image events using the OpenAI APIs."""
+    """Stream assistant text and image events with mode-aware tool selection."""
 
-    enabled_tools = enabled_tools or []
-    if enabled_tools:
-        async for event in _stream_with_mcp_tools(messages, model, enabled_tools):
+    internal_tools = internal_tools or []
+    mcp_tools = mcp_tools or []
+
+    if mode != "agent":
+        async for event in _stream_ask_mode(messages, model, enable_image_tool="internal.image" in set(internal_tools)):
             yield event
         return
+
+    async for event in _stream_agent_mode(
+        messages,
+        model,
+        enabled_internal=set(internal_tools),
+        enabled_mcp=set(mcp_tools),
+    ):
+        yield event
+
+
+async def _stream_ask_mode(
+    messages: List[dict],
+    model: str,
+    enable_image_tool: bool,
+) -> AsyncIterator[LLMEvent]:
+    """Single-shot ask mode using only internal tools (image generation)."""
 
     client = _get_client()
     started = time.time()
@@ -222,15 +241,18 @@ async def stream_response(
         )
 
 
-async def _stream_with_mcp_tools(
+async def _stream_agent_mode(
     messages: List[dict],
     model: str,
-    enabled_tools: List[str],
+    enabled_internal: set[str],
+    enabled_mcp: set[str],
 ) -> AsyncIterator[LLMEvent]:
-    """Handle tool-calling loop using chat completions for MCP tools."""
+    """Handle iterative agent loop using both internal and MCP tools."""
 
     client = _get_client()
-    tool_payloads, tool_name_map = await _build_tool_payloads(enabled_tools)
+    tool_payloads, tool_name_map = await _build_agent_tool_payloads(
+        enabled_internal_ids=enabled_internal, enabled_mcp_ids=enabled_mcp
+    )
     allowed_names = set(tool_name_map.keys())
     tool_results: list[str] = []
     if not tool_payloads:
@@ -289,12 +311,24 @@ async def _stream_with_mcp_tools(
                 call = _tool_call_to_dict(tc)
                 tool_name = call.get("function", {}).get("name") or ""
                 args = _parse_tool_args(call.get("function", {}).get("arguments"))
-                resolved_tool_id = tool_name_map.get(tool_name)
-                if not resolved_tool_id or tool_name not in allowed_names:
+                # Accept both safe names and full ids from the model
+                resolved_tool_id = tool_name_map.get(tool_name) or (
+                    tool_name if tool_name in tool_name_map.values() else None
+                )
+                allowed = tool_name in allowed_names or tool_name in tool_name_map.values()
+                if not resolved_tool_id or not allowed:
                     # Model asked for a tool that is not enabled this turn.
                     result_text = f"Tool {tool_name} is disabled for this turn."
+                elif resolved_tool_id.startswith("internal."):
+                    if resolved_tool_id not in enabled_internal:
+                        result_text = f"Tool {tool_name} is disabled for this turn."
+                    else:
+                        result_text = await _run_internal_tool(resolved_tool_id, args)
                 else:
-                    result_text = await _run_mcp_tool(resolved_tool_id, args)
+                    if resolved_tool_id not in enabled_mcp:
+                        result_text = f"Tool {tool_name} is disabled for this turn."
+                    else:
+                        result_text = await _run_mcp_tool(resolved_tool_id, args)
                 tool_results.append(result_text)
                 conversation.append(
                     {
@@ -320,18 +354,44 @@ async def _stream_with_mcp_tools(
     yield LLMEvent(type="text_done", text=fallback_text)
 
 
-async def _build_tool_payloads(enabled_tool_ids: List[str]) -> tuple[List[dict], dict[str, str]]:
+async def _build_agent_tool_payloads(
+    enabled_internal_ids: set[str],
+    enabled_mcp_ids: set[str],
+) -> tuple[List[dict], dict[str, str]]:
     """Return tool payloads and a map of safe names -> full ids."""
     payloads: List[dict] = []
     name_map: dict[str, str] = {}
     used_names: set[str] = set()
-    for tool_id in enabled_tool_ids:
+
+    # Internal tools
+    for tool_id in enabled_internal_ids:
+        definition = internal_tools.get_internal_tool_definition(tool_id)
+        if not definition:
+            continue
+        safe_name = _safe_tool_name(definition["id"], used_names)
+        used_names.add(safe_name)
+        name_map[safe_name] = definition["id"]
+        name_map[definition["id"]] = definition["id"]
+        payloads.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": safe_name,
+                    "description": definition.get("description") or "",
+                    "parameters": definition.get("parameters") or {"type": "object", "properties": {}},
+                },
+            }
+        )
+
+    # MCP tools
+    for tool_id in enabled_mcp_ids:
         definition = await mcp_manager.get_tool_definition_async(tool_id)
         if not definition:
             continue
         safe_name = _safe_tool_name(definition["full_name"], used_names)
         used_names.add(safe_name)
         name_map[safe_name] = definition["full_name"]
+        name_map[definition["full_name"]] = definition["full_name"]
         payloads.append(
             {
                 "type": "function",
@@ -375,6 +435,38 @@ async def _run_mcp_tool(tool_name: str, args: dict | None) -> str:
     except Exception as exc:  # pragma: no cover - safety for MCP failures
         logger.exception("MCP tool %s/%s failed", server, name)
         return f"Failed to run {tool_name}: {exc}"
+
+
+async def _run_internal_tool(tool_id: str, args: dict | None) -> str:
+    if tool_id == "internal.image":
+        return await _run_internal_image_tool(args or {})
+    return f"Unknown internal tool: {tool_id}"
+
+
+async def _run_internal_image_tool(args: dict) -> str:
+    prompt = (args.get("prompt") or "").strip()
+    if not prompt:
+        return "Image generation failed: prompt is required."
+    size = args.get("size") or "1024x1024"
+    client = _get_client()
+    try:
+        response = await client.images.generate(
+            model="gpt-image-1",
+            prompt=prompt,
+            size=size,
+        )
+        data = response.data[0] if getattr(response, "data", None) else None
+        b64_content = getattr(data, "b64_json", None) if data else None
+        url = getattr(data, "url", None) if data else None
+        if b64_content:
+            meta = image_store.save_image_from_base64(b64_content)
+            return f"Generated image:\n\n![{prompt}]({meta.url_path})"
+        if url:
+            return f"Generated image:\n\n![{prompt}]({url})"
+        return "Image generation failed: empty response."
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Internal image tool failed")
+        return f"Image generation failed: {exc}"
 
 
 def _parse_tool_args(raw_args: Any) -> dict:

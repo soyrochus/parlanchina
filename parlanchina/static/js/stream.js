@@ -18,6 +18,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const toolApplyBtn = document.getElementById("tool-apply");
   const toolCancelBtn = document.getElementById("tool-cancel");
   const toolToggleBtn = document.getElementById("toolbox-toggle");
+  const modeAskBtn = document.getElementById("mode-ask");
+  const modeAgentBtn = document.getElementById("mode-agent");
   
   // Custom fence renderer for Mermaid diagrams
   const defaultFence = md.renderer.rules.fence;
@@ -57,12 +59,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const currentSessionId = getCurrentSessionId();
 
   const toolState = {
-    tools: [],
-    applied: new Set(),
-    draft: new Set(),
+    modeApplied: "ask",
+    modeDraft: "ask",
+    internal: [],
+    mcp: [],
+    appliedInternal: new Set(),
+    appliedMcp: new Set(),
+    draftInternal: new Set(),
+    draftMcp: new Set(),
     mcpEnabled: true,
     serverCollapse: {},
     loaded: false,
+    mcpReason: null,
   };
 
   const setToolStatus = (text, isError = false) => {
@@ -72,28 +80,88 @@ document.addEventListener("DOMContentLoaded", () => {
     toolStatusEl.classList.toggle("dark:text-red-400", isError);
   };
 
-  const handleToggleTool = (toolId, checked) => {
+  const handleToggleTool = (toolId, checked, category) => {
+    const setRef = category === "internal" ? toolState.draftInternal : toolState.draftMcp;
     if (checked) {
-      toolState.draft.add(toolId);
+      setRef.add(toolId);
     } else {
-      toolState.draft.delete(toolId);
+      setRef.delete(toolId);
     }
-    setToolStatus(`${toolState.draft.size} tool(s) selected (draft)`);
+    const draftCount = toolState.draftInternal.size + (toolState.modeDraft === "agent" ? toolState.draftMcp.size : 0);
+    setToolStatus(`${draftCount} tool(s) selected (draft)`);
   };
 
   const renderToolRows = () => {
     if (!toolListEl) return;
     toolListEl.innerHTML = "";
-    if (!toolState.mcpEnabled) {
-      setToolStatus("MCP disabled", true);
-      return;
-    }
-    if (!toolState.tools.length) {
-      setToolStatus("No MCP tools found", true);
-      return;
-    }
 
-    const grouped = toolState.tools.reduce((acc, tool) => {
+    const modeIsAgent = toolState.modeDraft === "agent";
+
+    const makeCheckbox = (tool, checked, disabled, category) => {
+      const row = document.createElement("label");
+      row.className = `flex items-start gap-2 rounded-lg px-2 py-2 ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60"}`;
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:checked:bg-white";
+      checkbox.checked = checked;
+      checkbox.disabled = disabled;
+      checkbox.dataset.toolId = tool.id;
+      checkbox.addEventListener("change", (e) => {
+        handleToggleTool(tool.id, e.target.checked, category);
+      });
+      const textWrapper = document.createElement("div");
+      const label = document.createElement("p");
+      label.className = "text-sm font-medium text-slate-800 dark:text-slate-100";
+      label.textContent = tool.name;
+      const desc = document.createElement("p");
+      desc.className = "text-xs text-slate-500 dark:text-slate-400";
+      desc.textContent = tool.description || tool.id;
+      textWrapper.appendChild(label);
+      textWrapper.appendChild(desc);
+      row.appendChild(checkbox);
+      row.appendChild(textWrapper);
+      return row;
+    };
+
+    const internalSection = document.createElement("div");
+    const internalHeader = document.createElement("div");
+    internalHeader.className = "flex items-center justify-between";
+    internalHeader.innerHTML = `<p class="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">Internal tools</p>`;
+    internalSection.appendChild(internalHeader);
+    const internalList = document.createElement("div");
+    internalList.className = "mt-2 space-y-1";
+    toolState.internal
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .forEach((tool) => {
+        const row = makeCheckbox(tool, toolState.draftInternal.has(tool.id), false, "internal");
+        internalList.appendChild(row);
+      });
+    internalSection.appendChild(internalList);
+    toolListEl.appendChild(internalSection);
+
+    const mcpSection = document.createElement("div");
+    mcpSection.className = "mt-3";
+    const mcpHeader = document.createElement("div");
+    mcpHeader.className = "flex items-center justify-between";
+    const mcpLabel = document.createElement("p");
+    mcpLabel.className = "text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300";
+    mcpLabel.textContent = "MCP tools";
+    mcpHeader.appendChild(mcpLabel);
+    const mcpNote = document.createElement("p");
+    mcpNote.className = "text-xs text-slate-500 dark:text-slate-400";
+    if (!toolState.mcpEnabled) {
+      mcpNote.textContent = toolState.mcpReason || "MCP disabled";
+    } else if (!modeIsAgent) {
+      mcpNote.textContent = "Enable Agent mode to use MCP tools";
+    }
+    if (mcpNote.textContent) {
+      mcpHeader.appendChild(mcpNote);
+    }
+    mcpSection.appendChild(mcpHeader);
+
+    const disableMcp = !toolState.mcpEnabled || !modeIsAgent;
+    const grouped = toolState.mcp.reduce((acc, tool) => {
       acc[tool.server] = acc[tool.server] || [];
       acc[tool.server].push(tool);
       return acc;
@@ -101,7 +169,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     Object.entries(grouped).forEach(([server, tools]) => {
       const details = document.createElement("details");
-      details.className = "rounded-lg border border-slate-200/70 bg-white/60 px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/40";
+      details.className = `rounded-lg border border-slate-200/70 bg-white/60 px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/40 ${disableMcp ? "opacity-60" : ""}`;
       details.open = toolState.serverCollapse[server] !== false;
       details.addEventListener("toggle", () => {
         toolState.serverCollapse[server] = details.open;
@@ -112,64 +180,20 @@ document.addEventListener("DOMContentLoaded", () => {
       summary.innerHTML = `<span>${server}</span><span class="text-xs text-slate-500 dark:text-slate-400">${tools.length} tool${tools.length === 1 ? "" : "s"}</span>`;
       details.appendChild(summary);
 
-      const actions = document.createElement("div");
-      actions.className = "mt-2 flex items-center gap-2";
-      const selectAll = document.createElement("button");
-      selectAll.type = "button";
-      selectAll.textContent = "Select all";
-      selectAll.className = "rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
-      selectAll.addEventListener("click", (e) => {
-        e.preventDefault();
-        tools.forEach((tool) => toolState.draft.add(tool.id));
-        setToolStatus(`${toolState.draft.size} tool(s) selected (draft)`);
-        renderToolRows();
-      });
-      const clearAll = document.createElement("button");
-      clearAll.type = "button";
-      clearAll.textContent = "Clear";
-      clearAll.className = "rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
-      clearAll.addEventListener("click", (e) => {
-        e.preventDefault();
-        tools.forEach((tool) => toolState.draft.delete(tool.id));
-        setToolStatus(`${toolState.draft.size} tool(s) selected (draft)`);
-        renderToolRows();
-      });
-      actions.appendChild(selectAll);
-      actions.appendChild(clearAll);
-      details.appendChild(actions);
-
       const list = document.createElement("div");
       list.className = "mt-2 space-y-1";
       tools
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name))
         .forEach((tool) => {
-          const row = document.createElement("label");
-          row.className = "flex cursor-pointer items-start gap-2 rounded-lg px-2 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60";
-          const checkbox = document.createElement("input");
-          checkbox.type = "checkbox";
-          checkbox.className = "mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:checked:bg-white";
-          checkbox.checked = toolState.draft.has(tool.id);
-          checkbox.dataset.toolId = tool.id;
-          checkbox.addEventListener("change", (e) => {
-            handleToggleTool(tool.id, e.target.checked);
-          });
-          const textWrapper = document.createElement("div");
-          const label = document.createElement("p");
-          label.className = "text-sm font-medium text-slate-800 dark:text-slate-100";
-          label.textContent = tool.name;
-          const desc = document.createElement("p");
-          desc.className = "text-xs text-slate-500 dark:text-slate-400";
-          desc.textContent = tool.description || tool.id;
-          textWrapper.appendChild(label);
-          textWrapper.appendChild(desc);
-          row.appendChild(checkbox);
-          row.appendChild(textWrapper);
+          const row = makeCheckbox(tool, toolState.draftMcp.has(tool.id), disableMcp, "mcp");
           list.appendChild(row);
         });
       details.appendChild(list);
-      toolListEl.appendChild(details);
+      mcpSection.appendChild(details);
     });
+
+    toolListEl.appendChild(mcpSection);
   };
 
   const loadTools = async () => {
@@ -179,33 +203,51 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch(`/mcp/tools?session_id=${encodeURIComponent(currentSessionId)}`);
       if (!res.ok) throw new Error("Failed to load tools");
       const data = await res.json();
-      toolState.mcpEnabled = !!data.enabled;
-      if (!data.enabled) {
-        toolState.tools = [];
-        toolState.applied = new Set();
-        toolState.draft = new Set();
-        setToolStatus(data.reason || "MCP disabled", true);
-        renderToolRows();
-        return;
-      }
-      toolState.tools = data.tools || [];
-      const appliedIds = (data.tools || [])
-        .filter((tool) => tool.applied)
-        .map((tool) => tool.id);
-      toolState.applied = new Set(appliedIds);
-      toolState.draft = new Set(appliedIds);
+      toolState.modeApplied = data.mode || "ask";
+      toolState.modeDraft = toolState.modeApplied;
+      toolState.internal = data.internal || [];
+      toolState.mcp = data.mcp || [];
+      toolState.mcpEnabled = data.mcp_enabled !== false;
+      toolState.mcpReason = data.reason || null;
+      toolState.appliedInternal = new Set(
+        (toolState.internal || []).filter((tool) => tool.applied).map((tool) => tool.id)
+      );
+      toolState.appliedMcp = new Set((toolState.mcp || []).filter((tool) => tool.applied).map((tool) => tool.id));
+      toolState.draftInternal = new Set(toolState.appliedInternal);
+      toolState.draftMcp = new Set(toolState.appliedMcp);
       renderToolRows();
-      setToolStatus(`${toolState.applied.size} tool(s) applied`);
+      const appliedCount =
+        toolState.appliedInternal.size + (toolState.modeApplied === "agent" ? toolState.appliedMcp.size : 0);
+      if (!toolState.mcpEnabled) {
+        setToolStatus(toolState.mcpReason || "MCP disabled", true);
+      } else {
+        setToolStatus(`${appliedCount} tool(s) applied in ${toolState.modeApplied} mode`);
+      }
+      updateModeButtons();
     } catch (err) {
       console.debug("Unable to load tools", err);
-      toolState.tools = [];
-      toolState.applied = new Set();
-      toolState.draft = new Set();
+      toolState.internal = [];
+      toolState.mcp = [];
+      toolState.appliedInternal = new Set();
+      toolState.appliedMcp = new Set();
+      toolState.draftInternal = new Set();
+      toolState.draftMcp = new Set();
       setToolStatus("Unable to load tools", true);
       renderToolRows();
     } finally {
       toolState.loaded = true;
     }
+  };
+
+  const updateModeButtons = () => {
+    if (!modeAskBtn || !modeAgentBtn) return;
+    const activeClass = "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm";
+    const inactiveClass = "text-slate-700 dark:text-slate-200";
+    const setBtn = (btn, active) => {
+      btn.className = `rounded-md px-2 py-1 ${active ? activeClass : inactiveClass}`;
+    };
+    setBtn(modeAskBtn, toolState.modeDraft === "ask");
+    setBtn(modeAgentBtn, toolState.modeDraft === "agent");
   };
 
   const runMermaid = () => {
@@ -694,43 +736,77 @@ document.addEventListener("DOMContentLoaded", () => {
       await showToolPanel();
     });
 
+    modeAskBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      toolState.modeDraft = "ask";
+      updateModeButtons();
+      renderToolRows();
+    });
+    modeAgentBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      toolState.modeDraft = "agent";
+      updateModeButtons();
+      renderToolRows();
+    });
+
     toolSelectAllBtn?.addEventListener("click", (e) => {
       e.preventDefault();
-      if (!toolState.mcpEnabled) return;
-      toolState.tools.forEach((tool) => toolState.draft.add(tool.id));
+      toolState.internal.forEach((tool) => toolState.draftInternal.add(tool.id));
+      if (toolState.modeDraft === "agent" && toolState.mcpEnabled) {
+        toolState.mcp.forEach((tool) => toolState.draftMcp.add(tool.id));
+      }
       renderToolRows();
-      setToolStatus(`${toolState.draft.size} tool(s) selected (draft)`);
+      const totalDraft =
+        toolState.draftInternal.size + (toolState.modeDraft === "agent" ? toolState.draftMcp.size : 0);
+      setToolStatus(`${totalDraft} tool(s) selected (draft)`);
     });
     toolClearAllBtn?.addEventListener("click", (e) => {
       e.preventDefault();
-      if (!toolState.mcpEnabled) return;
-      toolState.draft.clear();
+      toolState.draftInternal.clear();
+      toolState.draftMcp.clear();
       renderToolRows();
       setToolStatus("No tools selected (draft)");
     });
     toolCancelBtn?.addEventListener("click", (e) => {
       e.preventDefault();
-      toolState.draft = new Set(toolState.applied);
+      toolState.draftInternal = new Set(toolState.appliedInternal);
+      toolState.draftMcp = new Set(toolState.appliedMcp);
+      toolState.modeDraft = toolState.modeApplied;
       renderToolRows();
+      updateModeButtons();
       hideToolPanel();
     });
     toolApplyBtn?.addEventListener("click", async (e) => {
       e.preventDefault();
-      if (!currentSessionId || !toolState.mcpEnabled) return;
+      if (!currentSessionId) return;
       try {
         const res = await fetch("/mcp/tools/selection", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             session_id: currentSessionId,
-            enabled_tools: Array.from(toolState.draft),
+            mode: toolState.modeDraft,
+            enabled_internal_tools: Array.from(toolState.draftInternal),
+            enabled_mcp_tools: Array.from(toolState.draftMcp),
           }),
         });
         if (res.ok) {
           const data = await res.json();
-          toolState.applied = new Set(data.enabled_tools || []);
-          toolState.draft = new Set(toolState.applied);
-          setToolStatus(`${toolState.applied.size} tool(s) applied`);
+          toolState.modeApplied = data.mode || toolState.modeDraft;
+          toolState.modeDraft = toolState.modeApplied;
+          toolState.internal = data.internal || toolState.internal;
+          toolState.mcp = data.mcp || toolState.mcp;
+          toolState.appliedInternal = new Set(
+            (data.internal || []).filter((tool) => tool.applied).map((tool) => tool.id)
+          );
+          toolState.appliedMcp = new Set((data.mcp || []).filter((tool) => tool.applied).map((tool) => tool.id));
+          toolState.draftInternal = new Set(toolState.appliedInternal);
+          toolState.draftMcp = new Set(toolState.appliedMcp);
+          renderToolRows();
+          updateModeButtons();
+          const appliedCount =
+            toolState.appliedInternal.size + (toolState.modeApplied === "agent" ? toolState.appliedMcp.size : 0);
+          setToolStatus(`${appliedCount} tool(s) applied in ${toolState.modeApplied} mode`);
           hideToolPanel();
         } else {
           setToolStatus("Failed to apply selection", true);

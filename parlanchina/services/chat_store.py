@@ -53,7 +53,10 @@ def create_session(title: str | None, model: str) -> dict[str, Any]:
         "id": session_id,
         "title": title or "New chat",
         "model": model,
-        "enabled_tools": None,
+        "mode": "ask",
+        "enabled_internal_tools": None,
+        "enabled_mcp_tools": None,
+        "enabled_tools": None,  # legacy
         "created_at": now,
         "updated_at": now,
         "messages": [],
@@ -123,8 +126,6 @@ def get_enabled_tools(session_id: str) -> list[str] | None:
     if not session:
         return None
     tools = session.get("enabled_tools")
-    if tools is None:
-        return None
     if isinstance(tools, list):
         return [t for t in tools if isinstance(t, str)]
     return None
@@ -135,6 +136,73 @@ def set_enabled_tools(session_id: str, enabled_tools: list[str]) -> None:
     if not session:
         raise FileNotFoundError(f"Session {session_id} not found")
     session["enabled_tools"] = enabled_tools
+    session["updated_at"] = _now()
+    _save_session(session)
+
+
+def get_enabled_internal_tools(session_id: str) -> list[str] | None:
+    session = load_session(session_id)
+    if not session:
+        return None
+    tools = session.get("enabled_internal_tools")
+    if tools is None:
+        return None
+    if isinstance(tools, list):
+        return [t for t in tools if isinstance(t, str)]
+    return None
+
+
+def set_enabled_internal_tools(session_id: str, enabled_tools: list[str]) -> None:
+    session = load_session(session_id)
+    if not session:
+        raise FileNotFoundError(f"Session {session_id} not found")
+    session["enabled_internal_tools"] = enabled_tools
+    session["updated_at"] = _now()
+    _save_session(session)
+
+
+def get_enabled_mcp_tools(session_id: str) -> list[str] | None:
+    session = load_session(session_id)
+    if not session:
+        return None
+    # Prefer new field, fall back to legacy enabled_tools
+    tools = session.get("enabled_mcp_tools")
+    if tools is None:
+        tools = session.get("enabled_tools")
+    if tools is None:
+        return None
+    if isinstance(tools, list):
+        return [t for t in tools if isinstance(t, str)]
+    return None
+
+
+def set_enabled_mcp_tools(session_id: str, enabled_tools: list[str]) -> None:
+    session = load_session(session_id)
+    if not session:
+        raise FileNotFoundError(f"Session {session_id} not found")
+    session["enabled_mcp_tools"] = enabled_tools
+    session["enabled_tools"] = enabled_tools  # keep legacy field in sync
+    session["updated_at"] = _now()
+    _save_session(session)
+
+
+def get_mode(session_id: str) -> str:
+    session = load_session(session_id)
+    if not session:
+        return "ask"
+    mode = session.get("mode")
+    if mode in {"ask", "agent"}:
+        return mode
+    return "ask"
+
+
+def set_mode(session_id: str, mode: str) -> None:
+    if mode not in {"ask", "agent"}:
+        return
+    session = load_session(session_id)
+    if not session:
+        raise FileNotFoundError(f"Session {session_id} not found")
+    session["mode"] = mode
     session["updated_at"] = _now()
     _save_session(session)
 

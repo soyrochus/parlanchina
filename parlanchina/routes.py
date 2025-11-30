@@ -15,7 +15,7 @@ from flask import (
     url_for,
 )
 
-from parlanchina.services import chat_store, image_store, llm, mcp_manager
+from parlanchina.services import chat_store, image_store, internal_tools, llm, mcp_manager
 
 bp = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
@@ -94,16 +94,25 @@ def stream_response(session_id: str):
     model = request.args.get("model") or session.get("model") or _resolve_model()
     payload_messages = _format_messages_for_model(session)
     app = current_app._get_current_object()
-    enabled_tools = chat_store.get_enabled_tools(session_id)
-    if enabled_tools is None and mcp_manager.is_enabled():
-        # Default to enabling all tools when none saved
-        try:
-            enabled_tools = [tool["id"] for tool in mcp_manager.list_all_tools()]
-            chat_store.set_enabled_tools(session_id, enabled_tools)
-        except Exception:
-            enabled_tools = []
-    if enabled_tools is None:
-        enabled_tools = []
+    mode = chat_store.get_mode(session_id)
+
+    # Internal tools default: all
+    internal_enabled = chat_store.get_enabled_internal_tools(session_id)
+    if internal_enabled is None:
+        internal_enabled = internal_tools.all_tool_ids()
+        chat_store.set_enabled_internal_tools(session_id, internal_enabled)
+
+    # MCP tools only when in agent mode and MCP is available
+    mcp_enabled_tools: list[str] = []
+    if mode == "agent" and mcp_manager.is_enabled():
+        enabled_tools = chat_store.get_enabled_mcp_tools(session_id)
+        if enabled_tools is None:
+            try:
+                enabled_tools = [tool["id"] for tool in mcp_manager.list_all_tools()]
+                chat_store.set_enabled_mcp_tools(session_id, enabled_tools)
+            except Exception:
+                enabled_tools = []
+        mcp_enabled_tools = enabled_tools or []
 
     def generate():
         import asyncio
@@ -121,7 +130,9 @@ def stream_response(session_id: str):
             async_gen = llm.stream_response(
                 payload_messages,
                 model,
-                enabled_tools=enabled_tools,
+                mode=mode,
+                internal_tools=internal_enabled,
+                mcp_tools=mcp_enabled_tools,
             )
             while True:
                 try:
