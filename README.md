@@ -194,6 +194,10 @@ You can switch modes and select tools in the Toolbox (above the input). Only the
    - Rename or delete from the menu; first user message triggers an automatic title suggestion.  
    - All chat history is kept in `data/sessions/` as JSON.
 
+## Documentation
+- Functional notes: [`doc/functional-doc.md`](doc/functional-doc.md)
+- Technical notes: [`doc/technicl-doc.md`](doc/technicl-doc.md)
+
 
 ## Principles of Participation
 
