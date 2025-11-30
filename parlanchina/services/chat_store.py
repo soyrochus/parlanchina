@@ -53,6 +53,7 @@ def create_session(title: str | None, model: str) -> dict[str, Any]:
         "id": session_id,
         "title": title or "New chat",
         "model": model,
+        "enabled_tools": None,
         "created_at": now,
         "updated_at": now,
         "messages": [],
@@ -115,6 +116,27 @@ def delete_session(session_id: str) -> None:
     if not path.exists():
         raise FileNotFoundError(f"Session {session_id} not found")
     path.unlink()
+
+
+def get_enabled_tools(session_id: str) -> list[str] | None:
+    session = load_session(session_id)
+    if not session:
+        return None
+    tools = session.get("enabled_tools")
+    if tools is None:
+        return None
+    if isinstance(tools, list):
+        return [t for t in tools if isinstance(t, str)]
+    return None
+
+
+def set_enabled_tools(session_id: str, enabled_tools: list[str]) -> None:
+    session = load_session(session_id)
+    if not session:
+        raise FileNotFoundError(f"Session {session_id} not found")
+    session["enabled_tools"] = enabled_tools
+    session["updated_at"] = _now()
+    _save_session(session)
 
 
 def _save_session(session: dict[str, Any]) -> None:

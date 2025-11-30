@@ -1,260 +1,203 @@
-# ✅ **FULL IMPLEMENTATION PROMPT — PARLANCHINA IMAGE GENERATION **
+This is a followq-up of [the previous instruction prompt which you did not properly implemement](prompts/2025-11-29-02-AGENTS.md). Do NOT try to implement the instructions of that file, only use it for context.
 
-You are extending **Parlanchina**, a real AI chat application built with **Flask + Jinja2 + Python**.
-Repository: [https://github.com/soyrochus/parlanchina](https://github.com/soyrochus/parlanchina)
+Instead, use the instructins of [THIS file](./AGENTS.md) in oder to address the issiues 
+You are an AI code-generation assistant working on an existing project called **Parlanchina**.
 
-Parlanchina is **not just a demo toy** — it is a **demo-performing application** used in client sessions.
-It must remain stable, comprehensible, maintainable, and extensible.
+Parlanchina is a small local **Python + Flask** web app that:
+- Provides a ChatGPT-style chat UI.
+- Reads an `mcp.json` file, starts MCP servers, and already connects to them correctly.
+- Can list tools from those MCP servers via an internal MCP manager service.
+- Currently exposes a manual “MCP TOOL” selector with an “ARGS (JSON, OPTIONAL)” field and a “Run tool” button, which lets the user call one tool manually.
 
-Currently, Parlanchina supports:
-
-* **Streaming text generation** (OpenAI Responses API)
-* **Markdown rendering**
-* **Mermaid diagrams** with a “rendering overlay” that hides flickers
-* **Session storage JSON files** (`chat_store.py` → `data/sessions/`)
-* **File uploads**
-* **A well-structured frontend with message-level UI state**
-
-Your task is to implement **image generation** using the **OpenAI Responses API** + the built-in **`image_generation` tool**.
-
-No second LLM call.
-No special `/image` endpoint.
-The model decides when to generate images.
+Your task: **do NOT touch the mcp.json handling or the MCP startup logic**. Those are correct. Instead, you must:
+1. Replace the current manual MCP UI with a **single tools configuration widget**.
+2. Wire the selected tools automatically into the LLM calls so the model can decide which tools to invoke.
 
 ---
 
-# 1. 🎯 **High-Level Goal**
+## Desired behaviour
 
-Extend Parlanchina so that **a single Responses call per assistant message** can produce:
+### MCP bootstrap (unchanged)
 
-* Only text
-* Only images
-* Text + images together
+- Keep the current behaviour where:
+  - `mcp.json` is read.
+  - MCP servers are started / connected (via the existing `mcp_manager` or equivalent).
+  - For each server, the available tools and their schemas can be queried.
 
-Images must:
-
-* Be stored under `data/images/` using a new image storage abstraction
-* Be rendered in the UI with placeholders + overlay while they are being prepared
-* Be included in chat history as Markdown image tags (`![alt](url)`)
-* Appear correctly after refresh (session replay)
-
-All existing text behavior must remain *completely unchanged*.
+**Do not re-implement or significantly change this.** Reuse the existing manager/service.
 
 ---
 
-# 2. 🧠 **LLM Integration (llm.py)**
+### New tools configuration UI
 
-Modify `llm.py` so that:
+Replace the current “MCP TOOL / ARGS / Run tool” strip in the main chat view with a single configuration widget similar in spirit to GitHub Copilot’s “Configure Tools” dialog (see screenshot reference).
 
-### 2.1. The single streaming function becomes tool-aware:
+Requirements:
 
-```python
-async def stream_response(
-    messages: list[dict],
-    model: str,
-    enable_image_tool: bool = True,
-) -> AsyncIterator[LLMEvent]
-```
+1. **Single tools panel** in the chat UI
+   - Located **above the message input** and below the chat history.
+   - No second selector above the input; no duplicated dropdowns.
 
-### 2.2. Define an internal event structure (you decide class/dict):
+2. **Hierarchical list with checkboxes**
+   - Group tools by server.
+   - For each server:
+     - Show a collapsible row with a server label (e.g. `drivew`, `postgres-mcp`, etc.).
+     - Under each server, list its tools; each tool has:
+       - A checkbox (checked = enabled, unchecked = disabled).
+       - A human-readable label such as `connect_db (postgres)` or `server_name:tool_name`.
+   - Optionally provide:
+     - A “Select all / Deselect all” for a server.
+     - A global “Select all / Deselect all” at the top.
 
-* `type`: `"text_delta" | "text_done" | "image_call" | "error"`
-* `text`: optional string
-* `image_b64`: optional base64 string
-* `image_params`: optional metadata (size, format, etc.)
-* `raw_event`: underlying Responses API payload (optional)
+3. **State and persistence**
+   - The enabled/disabled state should be **per chat session**.
+   - When a session is opened or reloaded:
+     - Load the current selection state from the backend (or from the session).
+     - Reflect it in the checkboxes.
+   - Default: when tools are first discovered for a new session, consider enabling all of them.
 
-### 2.3. The Responses call MUST include the tool:
+4. **No manual ‘Run tool’ in the chat**
+   - Remove from the main chat view:
+     - The manual “MCP TOOL” dropdown.
+     - The “ARGS (JSON, OPTIONAL)” textbox.
+     - The “Run tool” button.
+   - If a separate “debug / playground” page is needed for manual calls, keep that **in another route**, not in the normal user chat.
 
-```
-tools = [{
-  "type": "image_generation",
-  "model": "gpt-image-1",
-  "size": "1024x1024",
-  "quality": "high",
-  "output_format": "png"
-}]
-```
+Implementation guidelines:
 
-### 2.4. Event mapping:
+- Add a small REST endpoint (or reuse an existing one) like `GET /mcp/tools` that returns:
+  ```json
+  [
+    {
+      "server": "drivew",
+      "name": "connect_db",
+      "id": "drivew.connect_db",      // unique identifier
+      "description": "…",
+      "enabled": true
+    },
+    ...
+  ]
+````
 
-* Normal streamed deltas → `LLMEvent(type="text_delta")`
-* Final assistant text → `LLMEvent(type="text_done")`
-* Tool call result → `LLMEvent(type="image_call", image_b64=...)`
-
-NOTE:
-We ignore partial_image events in v1; handle only the final base64 image.
-
----
-
-# 3. 🗂️ **Image Storage Abstraction (`image_store.py`)**
-
-Create a new module:
-
-```
-parlanchina/services/image_store.py
-```
-
-### 3.1. Directory
-
-* Images must be stored under:
-
-```
-data/images/
-```
-
-Separate from session storage.
-
-### 3.2. API
-
-Create:
-
-```python
-class ImageMeta:
-    id: str
-    filename: str
-    url_path: str
-    created_at: str
-```
-
-Expose:
-
-```python
-def save_image_from_base64(image_b64: str, ext="png") -> ImageMeta
-def get_image_url(meta: ImageMeta) -> str
-```
-
-### 3.3. Serving images
-
-Implement **one** of:
-
-* A Flask route:
-
-```
-/images/<filename>
-```
-
-returning `send_from_directory("data/images", filename)`
-
-OR
-
-* Save to `/static/generated/` and serve as static files.
-
-Leave room for future DB/storage backend.
+* Add another endpoint like `POST /mcp/tools/selection` or integrate selection updates into the chat endpoint to save the enabled set in the session.
 
 ---
 
-# 4. 💾 **Session Storage (`chat_store.py`)**
+### Automatic tool integration into LLM calls
 
-Extend message schema:
+When the user sends a message, the LLM must see the **enabled tools** as part of the tools list in the request. The model then decides whether to call them.
 
-Add:
+1. **Collect selected tools**
 
-```json
-"images": [
-  {
-    "url": "/images/<id>.png",
-    "alt_text": "text description"
-  }
-]
-```
+   * On “Send message”:
 
-Where:
+     * The frontend collects the IDs of all **checked** tools (e.g. `["drivew.connect_db", "other.server.tool"]`).
+     * Send them with the chat request, e.g.:
 
-* `alt_text` is usually a short description (model-generated or derived from message content).
-* `images` is optional and empty on text-only messages.
+       ```json
+       {
+         "message": "user text",
+         "session_id": "...",
+         "enabled_tools": ["drivew.connect_db", "other.server.tool"]
+       }
+       ```
 
-**Do NOT store base64 in session files.**
+2. **Build the tools list for the model**
 
----
+   * In the Flask view / handler that sends requests to the LLM:
 
-# 5. 🔄 **Routing Layer (`routes.py`)**
+     * Use the existing MCP manager to map these IDs to their full tool definitions (name, description, parameters).
 
-Modify `/chat/<session_id>/stream` so that:
+     * Build the `tools` (or `functions`) list in the format expected by the underlying LLM API (e.g. OpenAI tools).
 
-* It iterates over `LLMEvent`s.
-* On `text_delta` → stream text to client (no change).
-* On `image_call`:
+       Pseudocode:
 
-  1. Save image to disk using `image_store.save_image_from_base64`.
-  2. Create a temporary **streaming message** for the frontend:
+       ```python
+       tools_for_llm = []
+       for tool_id in enabled_tools:
+           tool = mcp_manager.get_tool_definition(tool_id)  # you implement this helper
+           tools_for_llm.append({
+               "type": "function",
+               "function": {
+                   "name": tool["full_name"],          # e.g. "drivew.connect_db"
+                   "description": tool["description"],
+                   "parameters": tool["parameters"],   # JSON schema
+               },
+           })
+       ```
 
-     * Something like a structured `"image_start"` event OR
-     * A Markdown image string `![alt](url)`
-  3. Prepend a placeholder overlay for the UI.
-* On `text_done` → send final consolidated text.
+     * If `tools_for_llm` is non-empty, pass it to the LLM call.
 
-Modify `/chat/<session_id>/finalize`:
+     * If empty, call the LLM without tools (pure chat).
 
-* Must append the assistant message including:
+3. **Tool call execution loop**
 
-  * Final Markdown text
-  * Any `images` references
+   * Reuse or implement the standard tool-calling loop:
 
----
+     * Send user + system messages and `tools_for_llm` to the model.
+     * If the response includes a tool call:
 
-# 6. 🎨 **Frontend Rendering**
+       * Parse the tool name (e.g. `drivew.connect_db`) and arguments.
+       * Use the MCP manager to:
 
-Reuse the existing **Mermaid rendering overlay pattern**.
+         * Find the correct MCP server.
+         * Execute the tool with the provided args.
+       * Add a `tool` message with the result back into the conversation.
+       * Call the model again to get the final answer.
+   * IMPORTANT: only allow the model to call tools that were actually enabled in this turn.
 
-### 6.1. New message state flags:
+     * If a tool call is requested for a disabled tool, either:
 
-For each assistant message, track:
+       * Ignore and ask the model to respond without it, or
+       * Return an error system message indicating the tool is disabled.
 
-* `isRenderingImage: boolean`
-* `imageUrls: []` (list of URLs)
-* (If needed) `imagePendingCount`
+4. **No “active tool” concept**
 
-### 6.2. Overlay behavior (same as Mermaid)
-
-* When the stream signals an image is being generated:
-
-  * Create a visible placeholder box with fixed height.
-  * Render an opaque rounded overlay (“rendering…” shimmer).
-  * Once actual image URL arrives, hide overlay and show `<img>`.
-
-### 6.3. Markdown integration
-
-* Final assistant message must contain Markdown:
-
-```
-![alt text](/images/<id>.png)
-```
-
-* Rendering pipeline already converts this to `<img>`.
+   * Remove any logic that assumes “a single active / currently selected tool”.
+   * Tools are simply **available or not** each turn, defined by the checkbox selection.
 
 ---
 
-# 7. 🧭 **Model Behavior (implicit)**
+### Integration details & constraints
 
-In the **system prompt**, code agent should instruct the model:
+* Keep the project structure and style:
 
-* Use normal text unless an image is clearly beneficial.
-* If an image is useful or requested, call `image_generation` at least once.
-* Always accompany generated images with a short descriptive text.
+  * Use the existing Flask app, template engine, and front-end stack (plain JS / HTMX / Alpine / etc.).
+  * Add minimal JS needed to:
+
+    * Fetch tools list from the backend.
+    * Render / update the checkbox list.
+    * Include `enabled_tools` in the chat POST payload.
+* Use the existing MCP manager module (e.g. `parlanchina.services.mcp_manager`) to:
+
+  * Discover servers and tools.
+  * Execute tool calls.
+  * Get JSON schema for parameters.
+* Add concise comments where behaviour might not be obvious:
+
+  * How tools are filtered by `enabled_tools`.
+  * How the mapping from `tool_id` to MCP server + tool works.
 
 ---
 
-# 8. ✔️ **Non-Negotiable Constraints**
+### What you must deliver
 
-* **Text streaming must not change.**
-* **Mermaid rendering must not change.**
-* **Do not break current chat history semantics.**
-* **Do not store binary data in chat sessions.**
-* **Do not create a second OpenAI call per turn.**
-* **Keep the implementation clear, predictable, and modular.**
+1. Backend changes:
 
----
+   * Endpoints to:
 
-# 9. 📌 **Deliverables expected from the coding agent**
+     * List tools + enabled state per session.
+     * Accept `enabled_tools` in chat requests and build the correct tools list for the LLM.
+   * Integration with the existing MCP manager for discovery and invocation.
+   * Updated chat handler implementing automatic tool-calling.
 
-The agent must:
+2. Frontend changes:
 
-1. Modify `llm.py` to support mixed text+image events via Responses tool calls.
-2. Create `image_store.py` with the abstraction described.
-3. Extend streaming logic in `routes.py` to handle images.
-4. Extend `chat_store.py` message schema to record image metadata.
-5. Extend templates + JS so image overlays behave like Mermaid overlays.
-6. Ensure final Markdown includes images correctly.
-7. Ensure all functionality remains stable across refresh and session replay.
+   * Removal of the manual “MCP TOOL / ARGS / Run tool” UI from the main chat.
+   * A single tools configuration panel with hierarchical checkboxes (servers → tools).
+   * Wiring so that sending a message includes the currently enabled tools.
+
+3. Any necessary tests or small refactors to keep the code clean and maintainable.
+
+Inspect the existing Parlanchina repository, identify the relevant files (Flask routes, templates, JS, MCP manager), and implement all of the above so that the UI behaves like a tools selector and the LLM automatically sees and calls the enabled MCP tools.
 

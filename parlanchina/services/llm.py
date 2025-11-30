@@ -1,11 +1,15 @@
+import json
 import logging
 import os
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from openai import AsyncAzureOpenAI, AsyncOpenAI, OpenAIError
+
+from parlanchina.services import mcp_manager
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +111,15 @@ async def stream_response(
     messages: List[dict],
     model: str,
     enable_image_tool: bool = True,
+    enabled_tools: Optional[List[str]] = None,
 ) -> AsyncIterator[LLMEvent]:
-    """Stream assistant text and image events using the OpenAI Responses API."""
+    """Stream assistant text and image events using the OpenAI APIs."""
+
+    enabled_tools = enabled_tools or []
+    if enabled_tools:
+        async for event in _stream_with_mcp_tools(messages, model, enabled_tools):
+            yield event
+        return
 
     client = _get_client()
     started = time.time()
@@ -209,6 +220,183 @@ async def stream_response(
         logger.info(
             "Model %s streamed %s chars in %.2fs", model, total_chars, elapsed
         )
+
+
+async def _stream_with_mcp_tools(
+    messages: List[dict],
+    model: str,
+    enabled_tools: List[str],
+) -> AsyncIterator[LLMEvent]:
+    """Handle tool-calling loop using chat completions for MCP tools."""
+
+    client = _get_client()
+    tool_payloads, tool_name_map = await _build_tool_payloads(enabled_tools)
+    allowed_names = set(tool_name_map.keys())
+    if not tool_payloads:
+        # No valid tools resolved; fall back to plain completion.
+        final_text = await complete_response(messages, model)
+        for chunk in _yield_text_chunks(final_text):
+            yield LLMEvent(type="text_delta", text=chunk)
+        yield LLMEvent(type="text_done", text=final_text)
+        return
+
+    conversation = _format_input(messages)
+    if tool_payloads:
+        tool_list = ", ".join(sorted(tool_name_map.keys()))
+        conversation = [
+            {
+                "role": "system",
+                "content": (
+                    "You can call the available tools to fetch or modify data when it helps answer the user. "
+                    f"Tools enabled for this turn: {tool_list}. "
+                    "Call a tool when you need external data or actions; otherwise answer directly."
+                ),
+            }
+        ] + conversation
+    max_turns = 6
+    for _ in range(max_turns):
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=conversation,
+                tools=tool_payloads,
+                tool_choice="auto",
+            )
+        except OpenAIError as exc:
+            logger.exception("Chat completion error: %s", exc)
+            yield LLMEvent(type="error", text="Tool-enabled model call failed.")
+            return
+        except Exception as exc:  # pragma: no cover - catch-all safety
+            logger.exception("Unexpected tool-call error: %s", exc)
+            yield LLMEvent(type="error", text="Unexpected error during tool call.")
+            return
+
+        choice = (response.choices or [None])[0]
+        message = getattr(choice, "message", None)
+        if not message:
+            break
+
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if tool_calls:
+            assistant_message = {
+                "role": "assistant",
+                "content": message.content or "",
+                "tool_calls": [_tool_call_to_dict(tc) for tc in tool_calls],
+            }
+            conversation.append(assistant_message)
+            for tc in tool_calls:
+                call = _tool_call_to_dict(tc)
+                tool_name = call.get("function", {}).get("name") or ""
+                args = _parse_tool_args(call.get("function", {}).get("arguments"))
+                resolved_tool_id = tool_name_map.get(tool_name)
+                if not resolved_tool_id or tool_name not in allowed_names:
+                    # Model asked for a tool that is not enabled this turn.
+                    result_text = f"Tool {tool_name} is disabled for this turn."
+                else:
+                    result_text = await _run_mcp_tool(resolved_tool_id, args)
+                conversation.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.get("id") or "",
+                        "content": result_text,
+                        "name": tool_name or None,
+                    }
+                )
+            continue
+
+        final_text = message.content or ""
+        for chunk in _yield_text_chunks(final_text):
+            yield LLMEvent(type="text_delta", text=chunk)
+        yield LLMEvent(type="text_done", text=final_text)
+        return
+
+    yield LLMEvent(type="error", text="Tool call loop ended without a final response.")
+
+
+async def _build_tool_payloads(enabled_tool_ids: List[str]) -> tuple[List[dict], dict[str, str]]:
+    """Return tool payloads and a map of safe names -> full ids."""
+    payloads: List[dict] = []
+    name_map: dict[str, str] = {}
+    used_names: set[str] = set()
+    for tool_id in enabled_tool_ids:
+        definition = await mcp_manager.get_tool_definition_async(tool_id)
+        if not definition:
+            continue
+        safe_name = _safe_tool_name(definition["full_name"], used_names)
+        used_names.add(safe_name)
+        name_map[safe_name] = definition["full_name"]
+        payloads.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": safe_name,
+                    "description": definition.get("description") or "",
+                    "parameters": definition.get("parameters") or {"type": "object", "properties": {}},
+                },
+            }
+        )
+    return payloads, name_map
+
+
+def _tool_call_to_dict(tool_call: Any) -> dict:
+    try:
+        return tool_call.model_dump()
+    except Exception:
+        pass
+    try:
+        return tool_call.to_dict()
+    except Exception:
+        pass
+    function = getattr(tool_call, "function", None)
+    return {
+        "id": getattr(tool_call, "id", ""),
+        "type": getattr(tool_call, "type", "function"),
+        "function": {
+            "name": getattr(function, "name", None) if function else None,
+            "arguments": getattr(function, "arguments", None) if function else None,
+        },
+    }
+
+
+async def _run_mcp_tool(tool_name: str, args: dict | None) -> str:
+    if "." not in tool_name:
+        return f"Tool name {tool_name} is not in server.tool format."
+    server, name = tool_name.split(".", 1)
+    try:
+        result = await mcp_manager.call_tool_async(server, name, args or {})
+        return result.display_text
+    except Exception as exc:  # pragma: no cover - safety for MCP failures
+        logger.exception("MCP tool %s/%s failed", server, name)
+        return f"Failed to run {tool_name}: {exc}"
+
+
+def _parse_tool_args(raw_args: Any) -> dict:
+    if isinstance(raw_args, dict):
+        return raw_args
+    if isinstance(raw_args, str):
+        try:
+            parsed = json.loads(raw_args)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _yield_text_chunks(text: str, chunk_size: int = 200) -> List[str]:
+    if not text:
+        return []
+    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+
+def _safe_tool_name(full_name: str, used: set[str]) -> str:
+    """Generate an OpenAI-compliant tool name and keep a reverse map."""
+    base = re.sub(r"[^a-zA-Z0-9_-]", "_", full_name) or "tool"
+    candidate = base
+    suffix = 1
+    while candidate in used:
+        suffix += 1
+        candidate = f"{base}_{suffix}"
+    return candidate
 
 
 def _extract_text_output(response) -> str:

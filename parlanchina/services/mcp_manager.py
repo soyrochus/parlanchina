@@ -190,7 +190,87 @@ def list_tools(server_name: str) -> list[MCPToolSummary]:
         raise ValueError(f"Unknown MCP server: {server_name}")
     if not is_enabled():
         return []
-    return asyncio.run(_list_tools_async(server))
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_list_tools_async(server))
+    else:
+        # Running inside an event loop; callers should use the async variant.
+        raise RuntimeError("list_tools cannot be called from a running event loop; use list_tools_async")
+
+
+async def list_tools_async(server_name: str) -> list[MCPToolSummary]:
+    server = _servers.get(server_name)
+    if not server:
+        raise ValueError(f"Unknown MCP server: {server_name}")
+    if not is_enabled():
+        return []
+    return await _list_tools_async(server)
+
+
+def list_all_tools() -> list[dict[str, Any]]:
+    """Return flattened tools across all servers with stable ids."""
+    tools: list[dict[str, Any]] = []
+    if not is_enabled():
+        return tools
+    for server_name in _servers:
+        for tool in list_tools(server_name):
+            tools.append(
+                {
+                    "server": server_name,
+                    "name": tool.name,
+                    "id": f"{server_name}.{tool.name}",
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                }
+            )
+    return tools
+
+
+def get_tool_definition(tool_id: str) -> Optional[dict[str, Any]]:
+    """Map a tool id like 'server.tool' to its full definition."""
+    if "." not in tool_id:
+        return None
+    server_name, tool_name = tool_id.split(".", 1)
+    try:
+        tools = list_tools(server_name)
+    except ValueError:
+        return None
+
+    for tool in tools:
+        if tool.name == tool_name:
+            return {
+                "server": server_name,
+                "name": tool.name,
+                "id": tool_id,
+                "full_name": f"{server_name}.{tool.name}",
+                "description": tool.description,
+                "parameters": tool.input_schema or {"type": "object", "properties": {}},
+            }
+    return None
+
+
+async def get_tool_definition_async(tool_id: str) -> Optional[dict[str, Any]]:
+    """Async variant for contexts that already run an event loop."""
+    if "." not in tool_id:
+        return None
+    server_name, tool_name = tool_id.split(".", 1)
+    try:
+        tools = await list_tools_async(server_name)
+    except ValueError:
+        return None
+
+    for tool in tools:
+        if tool.name == tool_name:
+            return {
+                "server": server_name,
+                "name": tool.name,
+                "id": tool_id,
+                "full_name": f"{server_name}.{tool.name}",
+                "description": tool.description,
+                "parameters": tool.input_schema or {"type": "object", "properties": {}},
+            }
+    return None
 
 
 def call_tool(server_name: str, tool_name: str, args: dict[str, Any]) -> MCPToolResult:
@@ -206,6 +286,29 @@ def call_tool(server_name: str, tool_name: str, args: dict[str, Any]) -> MCPTool
         )
     try:
         return asyncio.run(_call_tool_async(server, tool_name, args or {}))
+    except Exception as exc:  # pragma: no cover - defensive logging for unexpected errors
+        logger.exception("Error calling MCP tool %s on %s", tool_name, server_name)
+        return MCPToolResult(
+            server_name=server_name,
+            tool_name=tool_name,
+            raw_result=None,
+            display_text=f"Failed to run {tool_name} on {server_name}: {exc}",
+        )
+
+
+async def call_tool_async(server_name: str, tool_name: str, args: dict[str, Any]) -> MCPToolResult:
+    server = _servers.get(server_name)
+    if not server:
+        raise ValueError(f"Unknown MCP server: {server_name}")
+    if not is_enabled():
+        return MCPToolResult(
+            server_name=server_name,
+            tool_name=tool_name,
+            raw_result=None,
+            display_text="MCP is disabled because fastmcp is not installed or no servers are configured.",
+        )
+    try:
+        return await _call_tool_async(server, tool_name, args or {})
     except Exception as exc:  # pragma: no cover - defensive logging for unexpected errors
         logger.exception("Error calling MCP tool %s on %s", tool_name, server_name)
         return MCPToolResult(
@@ -243,7 +346,7 @@ async def _call_tool_async(server: _ServerConfig, tool_name: str, args: dict[str
     return MCPToolResult(
         server_name=server.name,
         tool_name=tool_name,
-        raw_result=result.model_dump(mode="json"),
+        raw_result=_serialize_call_result(result),
         display_text=display,
     )
 
@@ -283,6 +386,8 @@ def _format_result_text(server_name: str, tool_name: str, result: Any) -> str:
         payload = result.result if hasattr(result, "result") else getattr(result, "raw", {})
     except Exception:
         payload = {}
+    if not payload:
+        payload = _serialize_call_result(result)
     serialized = _safe_json(payload)
     body = json.dumps(serialized, indent=2)
     return f"Result from {server_name}/{tool_name}:\n{body}"
@@ -294,3 +399,27 @@ def _safe_json(payload: Any) -> Any:
         return payload
     except TypeError:
         return json.loads(json.dumps(payload, default=str))
+
+
+def _serialize_call_result(result: Any) -> Any:
+    """Best-effort serialization for CallToolResult variants."""
+    for attr in ("model_dump", "dict", "to_dict"):
+        if hasattr(result, attr):
+            try:
+                # Some model_dump variants accept kwargs; keep default.
+                candidate = getattr(result, attr)()
+                return _safe_json(candidate)
+            except TypeError:
+                try:
+                    candidate = getattr(result, attr)(mode="json")
+                    return _safe_json(candidate)
+                except Exception:
+                    continue
+            except Exception:
+                continue
+    if hasattr(result, "__dict__"):
+        try:
+            return _safe_json(result.__dict__)
+        except Exception:
+            pass
+    return _safe_json(result)

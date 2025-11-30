@@ -15,7 +15,7 @@ from flask import (
     url_for,
 )
 
-from parlanchina.services import chat_store, image_store, llm
+from parlanchina.services import chat_store, image_store, llm, mcp_manager
 
 bp = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
@@ -65,12 +65,21 @@ def post_message(session_id: str):
     data = request.get_json(silent=True) or request.form
     content = (data.get("message") or "").strip()
     model = data.get("model") or None
+    enabled_tools = data.get("enabled_tools")
     if not content:
         abort(400, "Message content required")
 
     session = chat_store.load_session(session_id)
     if not session:
         abort(404)
+
+    if enabled_tools is not None:
+        if not isinstance(enabled_tools, list) or not all(isinstance(t, str) for t in enabled_tools):
+            abort(400, "enabled_tools must be a list of tool ids")
+        try:
+            chat_store.set_enabled_tools(session_id, enabled_tools)
+        except FileNotFoundError:
+            abort(404)
 
     # Check if this is the first user message in the session
     is_first_message = len(session.get("messages", [])) == 0
@@ -94,6 +103,16 @@ def stream_response(session_id: str):
     model = request.args.get("model") or session.get("model") or _resolve_model()
     payload_messages = _format_messages_for_model(session)
     app = current_app._get_current_object()
+    enabled_tools = chat_store.get_enabled_tools(session_id)
+    if enabled_tools is None and mcp_manager.is_enabled():
+        # Default to enabling all tools when none saved
+        try:
+            enabled_tools = [tool["id"] for tool in mcp_manager.list_all_tools()]
+            chat_store.set_enabled_tools(session_id, enabled_tools)
+        except Exception:
+            enabled_tools = []
+    if enabled_tools is None:
+        enabled_tools = []
 
     def generate():
         import asyncio
@@ -108,7 +127,11 @@ def stream_response(session_id: str):
                 asyncio.set_event_loop(loop)
 
             # Run the async generator in sync context
-            async_gen = llm.stream_response(payload_messages, model)
+            async_gen = llm.stream_response(
+                payload_messages,
+                model,
+                enabled_tools=enabled_tools,
+            )
             while True:
                 try:
                     event = loop.run_until_complete(async_gen.__anext__())

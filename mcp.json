@@ -5,8 +5,8 @@
       "description": "Example Postgres MCP server",
       "transport": {
         "type": "stdio",
-        "command": "npx",
-        "args": ["-y", "mcp-postgres-server"],
+        "command": "/home/iwk/.nvm/versions/node/v24.10.0/bin/mcp-postgres",
+        "args": [],
         "env": {
           "PG_HOST": "localhost",
           "PG_PORT": "5433",

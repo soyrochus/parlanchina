@@ -9,6 +9,12 @@ document.addEventListener("DOMContentLoaded", () => {
     linkify: true,
     breaks: true,
   });
+
+  const toolPanel = document.getElementById("tool-panel");
+  const toolListEl = document.getElementById("tool-list");
+  const toolStatusEl = document.getElementById("tool-status");
+  const toolSelectAllBtn = document.getElementById("tool-select-all");
+  const toolClearAllBtn = document.getElementById("tool-clear-all");
   
   // Custom fence renderer for Mermaid diagrams
   const defaultFence = md.renderer.rules.fence;
@@ -44,6 +50,182 @@ document.addEventListener("DOMContentLoaded", () => {
   // Get current session ID from form or URL
   const getCurrentSessionId = () => {
     return form?.dataset.sessionId || window.location.pathname.split('/').pop();
+  };
+  const currentSessionId = getCurrentSessionId();
+
+  const toolState = {
+    tools: [],
+    enabled: new Set(),
+    mcpEnabled: true,
+    serverCollapse: {},
+    loaded: false,
+  };
+  let saveToolsTimeout = null;
+
+  const setToolStatus = (text, isError = false) => {
+    if (!toolStatusEl) return;
+    toolStatusEl.textContent = text;
+    toolStatusEl.classList.toggle("text-red-500", isError);
+    toolStatusEl.classList.toggle("dark:text-red-400", isError);
+  };
+
+  const persistToolSelection = async () => {
+    if (!currentSessionId || !toolState.mcpEnabled) return;
+    try {
+      await fetch("/mcp/tools/selection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: currentSessionId,
+          enabled_tools: Array.from(toolState.enabled),
+        }),
+      });
+    } catch (err) {
+      console.debug("Failed to save tool selection", err);
+    }
+  };
+
+  const schedulePersistToolSelection = () => {
+    if (saveToolsTimeout) {
+      clearTimeout(saveToolsTimeout);
+    }
+    saveToolsTimeout = setTimeout(persistToolSelection, 300);
+  };
+
+  const handleToggleTool = (toolId, checked) => {
+    if (checked) {
+      toolState.enabled.add(toolId);
+    } else {
+      toolState.enabled.delete(toolId);
+    }
+    setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
+    schedulePersistToolSelection();
+  };
+
+  const renderToolRows = () => {
+    if (!toolListEl) return;
+    toolListEl.innerHTML = "";
+    if (!toolState.mcpEnabled) {
+      setToolStatus("MCP disabled", true);
+      return;
+    }
+    if (!toolState.tools.length) {
+      setToolStatus("No MCP tools found", true);
+      return;
+    }
+
+    const grouped = toolState.tools.reduce((acc, tool) => {
+      acc[tool.server] = acc[tool.server] || [];
+      acc[tool.server].push(tool);
+      return acc;
+    }, {});
+
+    Object.entries(grouped).forEach(([server, tools]) => {
+      const details = document.createElement("details");
+      details.className = "rounded-lg border border-slate-200/70 bg-white/60 px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/40";
+      details.open = toolState.serverCollapse[server] !== false;
+      details.addEventListener("toggle", () => {
+        toolState.serverCollapse[server] = details.open;
+      });
+
+      const summary = document.createElement("summary");
+      summary.className = "flex cursor-pointer select-none items-center justify-between gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100";
+      summary.innerHTML = `<span>${server}</span><span class="text-xs text-slate-500 dark:text-slate-400">${tools.length} tool${tools.length === 1 ? "" : "s"}</span>`;
+      details.appendChild(summary);
+
+      const actions = document.createElement("div");
+      actions.className = "mt-2 flex items-center gap-2";
+      const selectAll = document.createElement("button");
+      selectAll.type = "button";
+      selectAll.textContent = "Select all";
+      selectAll.className = "rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
+      selectAll.addEventListener("click", (e) => {
+        e.preventDefault();
+        tools.forEach((tool) => toolState.enabled.add(tool.id));
+        setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
+        renderToolRows();
+        schedulePersistToolSelection();
+      });
+      const clearAll = document.createElement("button");
+      clearAll.type = "button";
+      clearAll.textContent = "Clear";
+      clearAll.className = "rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
+      clearAll.addEventListener("click", (e) => {
+        e.preventDefault();
+        tools.forEach((tool) => toolState.enabled.delete(tool.id));
+        setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
+        renderToolRows();
+        schedulePersistToolSelection();
+      });
+      actions.appendChild(selectAll);
+      actions.appendChild(clearAll);
+      details.appendChild(actions);
+
+      const list = document.createElement("div");
+      list.className = "mt-2 space-y-1";
+      tools
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach((tool) => {
+          const row = document.createElement("label");
+          row.className = "flex cursor-pointer items-start gap-2 rounded-lg px-2 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.className = "mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:checked:bg-white";
+          checkbox.checked = toolState.enabled.has(tool.id);
+          checkbox.dataset.toolId = tool.id;
+          checkbox.addEventListener("change", (e) => {
+            handleToggleTool(tool.id, e.target.checked);
+          });
+          const textWrapper = document.createElement("div");
+          const label = document.createElement("p");
+          label.className = "text-sm font-medium text-slate-800 dark:text-slate-100";
+          label.textContent = tool.name;
+          const desc = document.createElement("p");
+          desc.className = "text-xs text-slate-500 dark:text-slate-400";
+          desc.textContent = tool.description || tool.id;
+          textWrapper.appendChild(label);
+          textWrapper.appendChild(desc);
+          row.appendChild(checkbox);
+          row.appendChild(textWrapper);
+          list.appendChild(row);
+        });
+      details.appendChild(list);
+      toolListEl.appendChild(details);
+    });
+  };
+
+  const loadTools = async () => {
+    if (!toolPanel || !currentSessionId) return;
+    setToolStatus("Loading tools…");
+    try {
+      const res = await fetch(`/mcp/tools?session_id=${encodeURIComponent(currentSessionId)}`);
+      if (!res.ok) throw new Error("Failed to load tools");
+      const data = await res.json();
+      toolState.mcpEnabled = !!data.enabled;
+      if (!data.enabled) {
+        toolState.tools = [];
+        toolState.enabled = new Set();
+        setToolStatus(data.reason || "MCP disabled", true);
+        renderToolRows();
+        return;
+      }
+      toolState.tools = data.tools || [];
+      const enabledIds = (data.tools || [])
+        .filter((tool) => tool.enabled)
+        .map((tool) => tool.id);
+      toolState.enabled = new Set(enabledIds);
+      renderToolRows();
+      setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
+    } catch (err) {
+      console.debug("Unable to load tools", err);
+      toolState.tools = [];
+      toolState.enabled = new Set();
+      setToolStatus("Unable to load tools", true);
+      renderToolRows();
+    } finally {
+      toolState.loaded = true;
+    }
   };
 
   const runMermaid = () => {
@@ -513,12 +695,36 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
+    if (toolPanel) {
+      loadTools();
+      toolSelectAllBtn?.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (!toolState.mcpEnabled) return;
+        toolState.tools.forEach((tool) => toolState.enabled.add(tool.id));
+        renderToolRows();
+        setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
+        schedulePersistToolSelection();
+      });
+      toolClearAllBtn?.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (!toolState.mcpEnabled) return;
+        toolState.enabled.clear();
+        renderToolRows();
+        setToolStatus("No tools enabled");
+        schedulePersistToolSelection();
+      });
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const sessionId = form.dataset.sessionId;
       const content = (textarea.value || "").trim();
       if (!content) return;
       const model = modelSelect?.value || modelSelect?.dataset.defaultModel || "";
+      const payload = { message: content, model };
+      if (toolState.loaded) {
+        payload.enabled_tools = Array.from(toolState.enabled || []);
+      }
 
       appendUserBubble(content);
       textarea.value = "";
@@ -526,7 +732,7 @@ document.addEventListener("DOMContentLoaded", () => {
       await fetch(`/chat/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: content, model }),
+        body: JSON.stringify(payload),
       });
 
       // If this was the first message, start checking for title updates

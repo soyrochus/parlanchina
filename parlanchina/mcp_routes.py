@@ -90,3 +90,82 @@ def run_tool(server_name: str, tool_name: str):
             "raw_markdown": raw_markdown,
         }
     )
+
+
+@bp.get("/tools")
+def list_tools():
+    """Return all known tools and their enabled state for a session."""
+    if not mcp_manager.is_enabled():
+        return jsonify(
+            {
+                "enabled": False,
+                "reason": mcp_manager.disabled_reason(),
+                "tools": [],
+            }
+        )
+
+    session_id = request.args.get("session_id")
+    if not session_id:
+        abort(400, "session_id is required")
+
+    session = chat_store.load_session(session_id)
+    if not session:
+        abort(404, "Session not found")
+
+    tools = mcp_manager.list_all_tools()
+    available_ids = {tool["id"] for tool in tools}
+
+    enabled = chat_store.get_enabled_tools(session_id)
+    if enabled is None:
+        # Default to all available tools for this session
+        enabled = sorted(available_ids)
+        chat_store.set_enabled_tools(session_id, enabled)
+
+    enabled_set = set(enabled)
+    # Remove stale tool ids that no longer exist
+    cleaned_enabled = sorted(enabled_set.intersection(available_ids))
+    if cleaned_enabled != enabled:
+        chat_store.set_enabled_tools(session_id, cleaned_enabled)
+        enabled_set = set(cleaned_enabled)
+
+    return jsonify(
+        {
+            "enabled": True,
+            "tools": [
+                {
+                    "server": tool["server"],
+                    "name": tool["name"],
+                    "id": tool["id"],
+                    "description": tool.get("description") or "",
+                    "enabled": tool["id"] in enabled_set,
+                }
+                for tool in tools
+            ],
+        }
+    )
+
+
+@bp.post("/tools/selection")
+def update_tool_selection():
+    """Persist enabled tool ids for a session."""
+    if not mcp_manager.is_enabled():
+        abort(503, mcp_manager.disabled_reason() or "MCP is disabled")
+
+    payload = request.get_json(force=True)
+    session_id = payload.get("session_id") if isinstance(payload.get("session_id"), str) else None
+    enabled_tools = payload.get("enabled_tools") if isinstance(payload.get("enabled_tools"), list) else None
+    if not session_id:
+        abort(400, "session_id is required")
+    if enabled_tools is None:
+        abort(400, "enabled_tools must be a list of tool ids")
+
+    session = chat_store.load_session(session_id)
+    if not session:
+        abort(404, "Session not found")
+
+    tools = mcp_manager.list_all_tools()
+    valid_ids = {tool["id"] for tool in tools}
+    normalized = [tool_id for tool_id in enabled_tools if isinstance(tool_id, str) and tool_id in valid_ids]
+
+    chat_store.set_enabled_tools(session_id, normalized)
+    return jsonify({"status": "ok", "enabled_tools": normalized})
