@@ -8,15 +8,16 @@
 [![Contributions welcome](https://img.shields.io/badge/Contributions-welcome-brightgreen.svg)](https://github.com/soyrochus/patina/issues)
 
 
-# Parlanchina
+# Parlanchina 0.9.0 (beta)
 
 ![Parlanchina logo](images/parlanchina-logo-small.png)
 
-Parlanchina is a production-ready AI chat application built on Flask. It streams assistant replies, renders rich content, persists sessions locally, and is polished enough for real demos and everyday use.
+Parlanchina is a Flask-based AI chat application you can use for real work and demos. It streams replies, renders rich content, persists sessions locally, and now ships with MCP tooling enabled by default (a PostgreSQL MCP server is preconfigured in `mcp.json`).
 
 ## Feature highlights
 
 - **Model selection**: Pick from your configured OpenAI/Azure models per session.
+- **MCP tools**: Toolbox panel with per-session tool selection; tools flow into LLM calls automatically. PostgreSQL MCP server works out of the box via the provided `mcp.json`.
 - **Live streaming**: Incremental text rendering that mirrors the final saved output.
 - **Markdown-first**: GitHub-flavored markdown with sanitized HTML on both client and server.
 - **Mermaid diagrams**: ```mermaid blocks render with flicker-masking overlays plus zoom controls.
@@ -27,7 +28,7 @@ Parlanchina is a production-ready AI chat application built on Flask. It streams
 - **Local persistence**: JSON session storage in `data/sessions/`; images in `data/images/`.
 - **Theming**: Light/dark/system toggle; Mermaid re-renders to match the theme.
 - **Session management**: Sidebar list, rename/delete, and automatic title suggestions on the first user message.
-- **Safety surfacing**: Image-generation errors are shown in Markdown with a short LLM explanation.
+- **Safety surfacing**: Tool/image errors are shown in Markdown with a brief explanation.
 
 ![Parlanchine UI](images/parlanchina-ui.png)
 
@@ -108,12 +109,18 @@ Set these in `.env` (loaded via `python-dotenv`):
 - `OPENAI_PROVIDER` — `openai` (default) or `azure`
 - `OPENAI_API_BASE` — custom/azure endpoint
 - `OPENAI_API_VERSION` — required for Azure
-- `PARLANCHINA_MODELS` — comma list of allowed models (e.g. `gpt-4o-mini,gpt-4o`)
+- `PARLANCHINA_MODELS` — comma list of allowed models (e.g. `gpt-5.1, gpt-5,1-mini`)
 - `PARLANCHINA_DEFAULT_MODEL` — picked if user does not select one
+- `LOG_LEVEL` — e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+- `LOG_FORMAT` — e.g., `%(asctime)s %(levelname)s %(name)s: %(message)s`
+- `LOG_TYPE` — `stream` (console) or `file`
+- `LOG_FILE` — filename if `LOG_TYPE=file` (default: `parlanchina.log`)
+
+Logging defaults to console (`LOG_TYPE=stream`) with a timestamped format. Raise `LOG_LEVEL` to `DEBUG` when troubleshooting MCP/tool calls or image generation; drop to `INFO`/`WARNING` for quieter runs. If you prefer log files, set `LOG_TYPE=file` and point `LOG_FILE` at your target path.
 
 ### MCP configuration
 
-Parlanchina can optionally connect to MCP servers via [FastMCP](https://pypi.org/project/fastmcp/). Add `fastmcp` to your environment (e.g., `uv add fastmcp`) and define `mcp.json` in the project root:
+Parlanchina connects to MCP servers via [FastMCP](https://pypi.org/project/fastmcp/). Add `fastmcp` to your environment (e.g., `uv add fastmcp`) and use the provided `mcp.json` (PostgreSQL MCP server preconfigured), or replace it with your own:
 
 ```json
 {
@@ -142,7 +149,8 @@ Parlanchina can optionally connect to MCP servers via [FastMCP](https://pypi.org
 
 - Supported transports: `stdio` (command/args/env) and `sse` (url/headers).
 - If `mcp.json` is missing or malformed, the chat UI still works and MCP controls stay disabled.
-- MCP tool runs can be triggered from the chat UI; successful calls are added to the current transcript.
+- Enable/disable tools per session via the Toolbox panel; only applied tools are exposed to the model.
+- Tool calls are driven by the model and streamed back into the transcript.
 
 ## How to use (functional guide)
 
