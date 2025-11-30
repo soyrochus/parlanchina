@@ -137,7 +137,7 @@ def list_tools():
                     "name": tool["name"],
                     "id": tool["id"],
                     "description": tool.get("description") or "",
-                    "enabled": tool["id"] in enabled_set,
+                    "applied": tool["id"] in enabled_set,
                 }
                 for tool in tools
             ],

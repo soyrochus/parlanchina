@@ -232,6 +232,7 @@ async def _stream_with_mcp_tools(
     client = _get_client()
     tool_payloads, tool_name_map = await _build_tool_payloads(enabled_tools)
     allowed_names = set(tool_name_map.keys())
+    tool_results: list[str] = []
     if not tool_payloads:
         # No valid tools resolved; fall back to plain completion.
         final_text = await complete_response(messages, model)
@@ -294,6 +295,7 @@ async def _stream_with_mcp_tools(
                     result_text = f"Tool {tool_name} is disabled for this turn."
                 else:
                     result_text = await _run_mcp_tool(resolved_tool_id, args)
+                tool_results.append(result_text)
                 conversation.append(
                     {
                         "role": "tool",
@@ -310,7 +312,12 @@ async def _stream_with_mcp_tools(
         yield LLMEvent(type="text_done", text=final_text)
         return
 
-    yield LLMEvent(type="error", text="Tool call loop ended without a final response.")
+    fallback_text = (
+        tool_results[-1]
+        if tool_results
+        else "Tool call loop ended without a final response. Please try again or adjust your request."
+    )
+    yield LLMEvent(type="text_done", text=fallback_text)
 
 
 async def _build_tool_payloads(enabled_tool_ids: List[str]) -> tuple[List[dict], dict[str, str]]:

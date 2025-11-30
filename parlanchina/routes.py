@@ -65,21 +65,12 @@ def post_message(session_id: str):
     data = request.get_json(silent=True) or request.form
     content = (data.get("message") or "").strip()
     model = data.get("model") or None
-    enabled_tools = data.get("enabled_tools")
     if not content:
         abort(400, "Message content required")
 
     session = chat_store.load_session(session_id)
     if not session:
         abort(404)
-
-    if enabled_tools is not None:
-        if not isinstance(enabled_tools, list) or not all(isinstance(t, str) for t in enabled_tools):
-            abort(400, "enabled_tools must be a list of tool ids")
-        try:
-            chat_store.set_enabled_tools(session_id, enabled_tools)
-        except FileNotFoundError:
-            abort(404)
 
     # Check if this is the first user message in the session
     is_first_message = len(session.get("messages", [])) == 0

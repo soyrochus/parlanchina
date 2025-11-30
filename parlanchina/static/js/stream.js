@@ -15,6 +15,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const toolStatusEl = document.getElementById("tool-status");
   const toolSelectAllBtn = document.getElementById("tool-select-all");
   const toolClearAllBtn = document.getElementById("tool-clear-all");
+  const toolApplyBtn = document.getElementById("tool-apply");
+  const toolCancelBtn = document.getElementById("tool-cancel");
+  const toolToggleBtn = document.getElementById("toolbox-toggle");
   
   // Custom fence renderer for Mermaid diagrams
   const defaultFence = md.renderer.rules.fence;
@@ -55,12 +58,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const toolState = {
     tools: [],
-    enabled: new Set(),
+    applied: new Set(),
+    draft: new Set(),
     mcpEnabled: true,
     serverCollapse: {},
     loaded: false,
   };
-  let saveToolsTimeout = null;
 
   const setToolStatus = (text, isError = false) => {
     if (!toolStatusEl) return;
@@ -69,37 +72,13 @@ document.addEventListener("DOMContentLoaded", () => {
     toolStatusEl.classList.toggle("dark:text-red-400", isError);
   };
 
-  const persistToolSelection = async () => {
-    if (!currentSessionId || !toolState.mcpEnabled) return;
-    try {
-      await fetch("/mcp/tools/selection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: currentSessionId,
-          enabled_tools: Array.from(toolState.enabled),
-        }),
-      });
-    } catch (err) {
-      console.debug("Failed to save tool selection", err);
-    }
-  };
-
-  const schedulePersistToolSelection = () => {
-    if (saveToolsTimeout) {
-      clearTimeout(saveToolsTimeout);
-    }
-    saveToolsTimeout = setTimeout(persistToolSelection, 300);
-  };
-
   const handleToggleTool = (toolId, checked) => {
     if (checked) {
-      toolState.enabled.add(toolId);
+      toolState.draft.add(toolId);
     } else {
-      toolState.enabled.delete(toolId);
+      toolState.draft.delete(toolId);
     }
-    setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
-    schedulePersistToolSelection();
+    setToolStatus(`${toolState.draft.size} tool(s) selected (draft)`);
   };
 
   const renderToolRows = () => {
@@ -141,10 +120,9 @@ document.addEventListener("DOMContentLoaded", () => {
       selectAll.className = "rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
       selectAll.addEventListener("click", (e) => {
         e.preventDefault();
-        tools.forEach((tool) => toolState.enabled.add(tool.id));
-        setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
+        tools.forEach((tool) => toolState.draft.add(tool.id));
+        setToolStatus(`${toolState.draft.size} tool(s) selected (draft)`);
         renderToolRows();
-        schedulePersistToolSelection();
       });
       const clearAll = document.createElement("button");
       clearAll.type = "button";
@@ -152,10 +130,9 @@ document.addEventListener("DOMContentLoaded", () => {
       clearAll.className = "rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
       clearAll.addEventListener("click", (e) => {
         e.preventDefault();
-        tools.forEach((tool) => toolState.enabled.delete(tool.id));
-        setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
+        tools.forEach((tool) => toolState.draft.delete(tool.id));
+        setToolStatus(`${toolState.draft.size} tool(s) selected (draft)`);
         renderToolRows();
-        schedulePersistToolSelection();
       });
       actions.appendChild(selectAll);
       actions.appendChild(clearAll);
@@ -172,7 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
           const checkbox = document.createElement("input");
           checkbox.type = "checkbox";
           checkbox.className = "mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:checked:bg-white";
-          checkbox.checked = toolState.enabled.has(tool.id);
+          checkbox.checked = toolState.draft.has(tool.id);
           checkbox.dataset.toolId = tool.id;
           checkbox.addEventListener("change", (e) => {
             handleToggleTool(tool.id, e.target.checked);
@@ -205,22 +182,25 @@ document.addEventListener("DOMContentLoaded", () => {
       toolState.mcpEnabled = !!data.enabled;
       if (!data.enabled) {
         toolState.tools = [];
-        toolState.enabled = new Set();
+        toolState.applied = new Set();
+        toolState.draft = new Set();
         setToolStatus(data.reason || "MCP disabled", true);
         renderToolRows();
         return;
       }
       toolState.tools = data.tools || [];
-      const enabledIds = (data.tools || [])
-        .filter((tool) => tool.enabled)
+      const appliedIds = (data.tools || [])
+        .filter((tool) => tool.applied)
         .map((tool) => tool.id);
-      toolState.enabled = new Set(enabledIds);
+      toolState.applied = new Set(appliedIds);
+      toolState.draft = new Set(appliedIds);
       renderToolRows();
-      setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
+      setToolStatus(`${toolState.applied.size} tool(s) applied`);
     } catch (err) {
       console.debug("Unable to load tools", err);
       toolState.tools = [];
-      toolState.enabled = new Set();
+      toolState.applied = new Set();
+      toolState.draft = new Set();
       setToolStatus("Unable to load tools", true);
       renderToolRows();
     } finally {
@@ -695,25 +675,71 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
-    if (toolPanel) {
-      loadTools();
-      toolSelectAllBtn?.addEventListener("click", (e) => {
-        e.preventDefault();
-        if (!toolState.mcpEnabled) return;
-        toolState.tools.forEach((tool) => toolState.enabled.add(tool.id));
-        renderToolRows();
-        setToolStatus(`${toolState.enabled.size} tool(s) enabled`);
-        schedulePersistToolSelection();
-      });
-      toolClearAllBtn?.addEventListener("click", (e) => {
-        e.preventDefault();
-        if (!toolState.mcpEnabled) return;
-        toolState.enabled.clear();
-        renderToolRows();
-        setToolStatus("No tools enabled");
-        schedulePersistToolSelection();
-      });
-    }
+    const showToolPanel = async () => {
+      await loadTools();
+      if (toolPanel) {
+        toolPanel.classList.remove("hidden");
+      }
+    };
+
+    const hideToolPanel = () => {
+      if (toolPanel) {
+        toolPanel.classList.add("hidden");
+        setToolStatus("Toolbox closed");
+      }
+    };
+
+    toolToggleBtn?.addEventListener("click", async (e) => {
+      e.preventDefault();
+      await showToolPanel();
+    });
+
+    toolSelectAllBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (!toolState.mcpEnabled) return;
+      toolState.tools.forEach((tool) => toolState.draft.add(tool.id));
+      renderToolRows();
+      setToolStatus(`${toolState.draft.size} tool(s) selected (draft)`);
+    });
+    toolClearAllBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (!toolState.mcpEnabled) return;
+      toolState.draft.clear();
+      renderToolRows();
+      setToolStatus("No tools selected (draft)");
+    });
+    toolCancelBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      toolState.draft = new Set(toolState.applied);
+      renderToolRows();
+      hideToolPanel();
+    });
+    toolApplyBtn?.addEventListener("click", async (e) => {
+      e.preventDefault();
+      if (!currentSessionId || !toolState.mcpEnabled) return;
+      try {
+        const res = await fetch("/mcp/tools/selection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: currentSessionId,
+            enabled_tools: Array.from(toolState.draft),
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          toolState.applied = new Set(data.enabled_tools || []);
+          toolState.draft = new Set(toolState.applied);
+          setToolStatus(`${toolState.applied.size} tool(s) applied`);
+          hideToolPanel();
+        } else {
+          setToolStatus("Failed to apply selection", true);
+        }
+      } catch (err) {
+        console.debug("Failed to apply tools", err);
+        setToolStatus("Failed to apply selection", true);
+      }
+    });
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -722,9 +748,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!content) return;
       const model = modelSelect?.value || modelSelect?.dataset.defaultModel || "";
       const payload = { message: content, model };
-      if (toolState.loaded) {
-        payload.enabled_tools = Array.from(toolState.enabled || []);
-      }
 
       appendUserBubble(content);
       textarea.value = "";
