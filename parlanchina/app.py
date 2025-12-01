@@ -7,6 +7,7 @@ from flask import Flask
 
 from parlanchina.config import load_config
 from parlanchina.paths import Mode, detect_mode
+from parlanchina.utils.banner import load_banner_html
 
 _DESKTOP_ENV_KEYS = {
     "OPENAI_API_KEY",
@@ -113,12 +114,19 @@ def create_app(app_root: Path, dirs: dict) -> Flask:
     app.config["PARLANCHINA_MODELS"] = _resolve_models(config_values)
     app.config["PARLANCHINA_DEFAULT_MODEL"] = _resolve_default_model(config_values)
     app.config["RAW_CONFIG"] = raw_config
+    app.config["BANNER_HTML"] = load_banner_html()
 
     from parlanchina.routes import bp as base_routes
     from parlanchina.mcp_routes import bp as mcp_bp
 
     app.register_blueprint(base_routes)
     app.register_blueprint(mcp_bp)
+
+    @app.context_processor
+    def _inject_banner() -> dict[str, Any]:
+        return {
+            "banner_html": app.config.get("BANNER_HTML", ""),
+        }
 
     return app
 
