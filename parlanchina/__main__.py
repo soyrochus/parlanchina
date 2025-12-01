@@ -40,6 +40,12 @@ def _run_dev(args: argparse.Namespace) -> None:
     app = create_app(root, dirs)
 
     debug = True if args.debug is None else args.debug
+
+    if debug:
+        if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+            _print_banner()
+    else:
+        _print_banner()
     app.run(
         host=args.host,
         port=args.port,
@@ -52,6 +58,8 @@ def _run_dev(args: argparse.Namespace) -> None:
 def _run_desktop(args: argparse.Namespace) -> None:
     os.environ.setdefault("PARLANCHINA_MODE", "desktop")
     debug = False if args.debug is None else args.debug
+
+    _print_banner()
 
     def _start_server() -> None:
         root = get_app_root(mode=Mode.DESKTOP, cli_root=args.root)
@@ -106,6 +114,34 @@ def _load_dev_dotenv(root: Path) -> None:
     except ImportError:
         return
     load_dotenv(dotenv_path=str(dotenv_path), override=False)
+
+
+def _print_banner() -> None:
+    candidate_dirs = [
+        Path(__file__).resolve().parent,
+        Path(__file__).resolve().parent.parent,
+        Path.cwd(),
+    ]
+
+    banner_text = None
+    for base in candidate_dirs:
+        banner_path = base / "banner.md"
+        if banner_path.exists():
+            try:
+                raw_text = banner_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            lines = []
+            for raw_line in raw_text.splitlines():
+                stripped = raw_line.strip()
+                if stripped.startswith("<!--") and stripped.endswith("-->"):
+                    continue
+                lines.append(raw_line.rstrip())
+            banner_text = "\n".join(lines).strip()
+            break
+
+    if banner_text:
+        print(banner_text)
 
 
 if __name__ == "__main__":
