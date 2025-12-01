@@ -91,7 +91,33 @@
               startOnLoad: false, 
               theme: isDark ? 'dark' : 'default',
               securityLevel: 'loose',
-              fontFamily: '"Inter", ui-sans-serif, system-ui'
+              fontFamily: '"Inter", ui-sans-serif, system-ui',
+              // Force consistent sizing
+              flowchart: {
+                nodeSpacing: 50,
+                rankSpacing: 50,
+                curve: 'basis',
+                useMaxWidth: false
+              },
+              er: {
+                entityPadding: 15,
+                stroke: 'gray',
+                fill: 'honeydew',
+                fontSize: 12,
+                useMaxWidth: false
+              },
+              // Set minimum diagram width
+              gantt: {
+                numberSectionStyles: 4,
+                useMaxWidth: false
+              },
+              // Global diagram config
+              themeVariables: {
+                primaryColor: '#4f46e5',
+                primaryTextColor: '#1f2937',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#9ca3af'
+              }
             });
           } catch (error) {
             console.error('[Parlanchina] Failed to initialize Mermaid:', error);
@@ -113,11 +139,40 @@
       background-color: transparent !important;
     }
     
-    /* Mermaid container positioning */
+    /* Mermaid container positioning and sizing */
     .mermaid-container {
       position: relative;
       display: block;
       margin: 1rem 0;
+      width: 100%;
+      overflow-x: auto;
+    }
+    
+    /* Ensure consistent Mermaid diagram sizing */
+    .mermaid svg {
+      min-width: 500px !important;
+      width: 100% !important;
+      height: auto !important;
+      display: block;
+      max-height: 800px; /* Prevent excessive height */
+    }
+    
+    /* Specific sizing for ER diagrams - allow them to be larger */
+    .mermaid svg[aria-roledescription="er"] {
+      min-width: 700px !important;
+      max-height: 1000px !important; /* ER diagrams can be taller */
+    }
+    
+    /* State diagrams - keep them more compact */
+    .mermaid svg[aria-roledescription="stateDiagram"] {
+      min-width: 500px !important;
+      max-height: 600px !important;
+    }
+    
+    /* Flowcharts - moderate sizing */
+    .mermaid svg[aria-roledescription="flowchart-v2"] {
+      min-width: 600px !important;
+      max-height: 700px !important;
     }
     
     /* Mermaid zoom button styling */

@@ -291,7 +291,54 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const runMermaid = () => {
     if (window.mermaid) {
-      return window.mermaid.run();
+      return window.mermaid.run().then(() => {
+        // After Mermaid rendering, apply intelligent sizing
+        document.querySelectorAll('.mermaid svg').forEach(svg => {
+          const currentWidth = parseInt(svg.getAttribute('width')) || 600;
+          const currentHeight = parseInt(svg.getAttribute('height')) || 400;
+          
+          // Calculate aspect ratio
+          const aspectRatio = currentWidth / currentHeight;
+          
+          // Apply minimum sizes based on diagram type
+          const role = svg.getAttribute('aria-roledescription');
+          let minWidth = 600;
+          let minHeight = 400;
+          
+          if (role === 'er') {
+            minWidth = 800;
+            minHeight = 500;
+          } else if (role === 'flowchart-v2') {
+            minWidth = 700;
+            minHeight = 400;
+          } else if (role === 'stateDiagram') {
+            // For state diagrams, be more conservative with height
+            minWidth = 600;
+            minHeight = Math.min(400, currentHeight); // Don't force height if content is tall
+          }
+          
+          // Only scale up if diagram is smaller than minimum AND has reasonable proportions
+          if (currentWidth < minWidth && aspectRatio > 0.5) {
+            const scale = minWidth / currentWidth;
+            // Only scale if it doesn't make height excessive
+            const newHeight = currentHeight * scale;
+            if (newHeight <= 800 || role === 'er') { // Allow ER diagrams to be taller
+              svg.setAttribute('width', Math.ceil(currentWidth * scale));
+              svg.setAttribute('height', Math.ceil(newHeight));
+              svg.style.width = Math.ceil(currentWidth * scale) + 'px';
+              svg.style.height = Math.ceil(newHeight) + 'px';
+            } else {
+              // Just set reasonable dimensions without scaling
+              svg.style.width = '100%';
+              svg.style.height = 'auto';
+            }
+          } else {
+            // Ensure responsive behavior for already appropriately sized diagrams
+            svg.style.width = '100%';
+            svg.style.height = 'auto';
+          }
+        });
+      });
     }
     return Promise.resolve();
   };

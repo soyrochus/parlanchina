@@ -56,6 +56,41 @@
       const pre = container.querySelector('pre.mermaid');
       try {
         await window.mermaid.run({ nodes: [pre] });
+        
+        // Apply intelligent sizing to modal diagrams
+        const svg = container.querySelector('svg');
+        if (svg) {
+          const currentWidth = parseInt(svg.getAttribute('width')) || 600;
+          const currentHeight = parseInt(svg.getAttribute('height')) || 400;
+          const aspectRatio = currentWidth / currentHeight;
+          const role = svg.getAttribute('aria-roledescription');
+          
+          let targetWidth = 800;
+          let maxHeight = 600;
+          
+          if (role === 'er') {
+            targetWidth = 900;
+            maxHeight = 800;
+          } else if (role === 'stateDiagram') {
+            targetWidth = 700;
+            maxHeight = 500;
+          }
+          
+          // Calculate size for modal with aspect ratio preservation
+          let finalWidth = Math.max(targetWidth, currentWidth);
+          let finalHeight = finalWidth / aspectRatio;
+          
+          // Constrain height if excessive
+          if (finalHeight > maxHeight) {
+            finalHeight = maxHeight;
+            finalWidth = finalHeight * aspectRatio;
+          }
+          
+          svg.setAttribute('width', Math.ceil(finalWidth));
+          svg.setAttribute('height', Math.ceil(finalHeight));
+          svg.style.width = Math.ceil(finalWidth) + 'px';
+          svg.style.height = Math.ceil(finalHeight) + 'px';
+        }
       } catch (err) {
         console.error('Failed to render Mermaid diagram in modal:', err);
       }
