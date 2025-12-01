@@ -10,7 +10,16 @@ from parlanchina.utils.markdown import render_markdown
 
 
 def _data_dir() -> Path:
-    return current_app.config["DATA_DIR"]
+    data_dir: Path = current_app.config["DIRS"]["data"]
+    session_dir = data_dir / "sessions"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return session_dir
+
+
+def _history_path() -> Path:
+    data_dir: Path = current_app.config["DIRS"]["data"]
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "history.jsonl"
 
 
 def _session_path(session_id: str) -> Path:
@@ -19,6 +28,14 @@ def _session_path(session_id: str) -> Path:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _append_history(role: str, text: str) -> None:
+    entry = {"ts": _now(), "role": role, "text": text}
+    history_file = _history_path()
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    with history_file.open("a", encoding="utf-8") as fp:
+        fp.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def list_sessions() -> list[dict[str, Any]]:
@@ -74,6 +91,7 @@ def append_user_message(session_id: str, content: str, *, model: str | None = No
     if model:
         session["model"] = model
     _save_session(session)
+    _append_history("user", content)
     return session
 
 
@@ -100,6 +118,7 @@ def append_assistant_message(
     if model:
         session["model"] = model
     _save_session(session)
+    _append_history("assistant", content)
     return message
 
 

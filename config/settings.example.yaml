@@ -1,0 +1,12 @@
+OPENAI_API_KEY: changeme
+OPENAI_PROVIDER: openai
+OPENAI_API_BASE: ""
+OPENAI_API_VERSION: ""
+PARLANCHINA_MODELS:
+  - gpt-5.1
+  - gpt-5.1-mini
+PARLANCHINA_DEFAULT_MODEL: gpt-5.1
+LOG_LEVEL: INFO
+LOG_FORMAT: "%(asctime)s %(levelname)s %(name)s: %(message)s"
+LOG_TYPE: file
+LOG_FILE: app.log

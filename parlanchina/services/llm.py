@@ -13,28 +13,36 @@ from parlanchina.services import image_store, internal_tools, mcp_manager
 
 logger = logging.getLogger(__name__)
 
-_provider = os.getenv("OPENAI_PROVIDER", "openai").lower()
-_api_key = os.getenv("OPENAI_API_KEY")
-_api_base = os.getenv("OPENAI_API_BASE")
-_api_version = os.getenv("OPENAI_API_VERSION")
-
 _client = None
+_client_signature: tuple[str, str | None, str | None, str | None] | None = None
 
 
 def _get_client():
-    global _client
-    if _client:
+    global _client, _client_signature
+
+    signature = _current_client_signature()
+    if _client and _client_signature == signature:
         return _client
 
-    if _provider == "azure":
+    provider, api_key, api_base, api_version = signature
+    if provider == "azure":
         _client = AsyncAzureOpenAI(
-            api_key=_api_key,
-            api_version=_api_version,
-            azure_endpoint=_api_base,
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=api_base,
         )
     else:
-        _client = AsyncOpenAI(api_key=_api_key, base_url=_api_base)
+        _client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+    _client_signature = signature
     return _client
+
+
+def _current_client_signature() -> tuple[str, str | None, str | None, str | None]:
+    provider = (os.getenv("OPENAI_PROVIDER") or "openai").lower()
+    api_key = os.getenv("OPENAI_API_KEY")
+    api_base = os.getenv("OPENAI_API_BASE")
+    api_version = os.getenv("OPENAI_API_VERSION")
+    return provider, api_key, api_base, api_version
 
 
 def _format_input(messages: List[dict]) -> List[dict]:
