@@ -8,7 +8,7 @@
 [![Contributions welcome](https://img.shields.io/badge/Contributions-welcome-brightgreen.svg)](https://github.com/soyrochus/patina/issues)
 
 
-# Parlanchina 0.9.0 (beta)
+## Parlanchina 0.9.0 (beta)
 
 ![Parlanchina logo](images/parlanchina-logo-small.png)
 
@@ -79,31 +79,76 @@ cp .env.example .env
 
 ## Quickstart
 
-If you've already completed the installation steps above, start the app with:
+Parlanchina now ships with a unified CLI: `uv run -m parlanchina [mode]`. If you omit `mode`, the desktop experience (PyWebView shell) launches by default; pass `dev` to stay in the traditional browser workflow. Helper scripts wrap the same command so you can keep muscle memory per platform.
 
-**macOS/Linux:**
+### Desktop mode (default)
 
-```bash
-./parlanchina.sh
-```
+Runs the Flask server in the background and opens a native window using PyWebView.
 
-**Windows (PowerShell):**
+- **macOS/Linux:**
 
-```powershell
-.\parlanchina.ps1
-```
+   ```bash
+   ./run_parlanchina_desktop.sh
+   ```
 
-**Or manually:**
+- **Windows (PowerShell):**
 
-```bash
-uv run hypercorn parlanchina:app --bind 127.0.0.1:5000 --reload
-```
+   ```powershell
+   .\run_parlanchina_desktop.ps1
+   ```
 
-Then open your browser to `http://127.0.0.1:5000`
+- **Direct CLI equivalent:**
+
+   ```bash
+   uv run -m parlanchina desktop
+   ```
+
+   You can add flags such as `--root`, `--host`, `--port`, `--debug`, or `--no-debug` to customize the runtime.
+
+### Dev/web mode (classic browser flow)
+
+This mirrors the previous workflow where you pointed a browser at Flask directly.
+
+- **macOS/Linux:**
+
+   ```bash
+   ./run_parlanchina_web.sh
+   ```
+
+- **Windows (PowerShell):**
+
+   ```powershell
+   .\run_parlanchina_web.ps1
+   ```
+
+- **Direct CLI equivalent:**
+
+   ```bash
+   uv run -m parlanchina dev
+   ```
+
+   When launched in dev mode, Flask runs with the reloader enabled by default, so visiting `http://127.0.0.1:5000` in your browser shows the familiar interface.
 
 ## Configuration
 
-Set these in `.env` (loaded via `python-dotenv`):
+Parlanchina resolves settings from multiple sources (highest precedence first):
+
+1. CLI flags such as `--root`, `--host`, `--port`, `--debug`, `--no-debug`.
+2. Environment variables (including values loaded from `.env` when running in dev mode).
+3. A config file at `<root>/config/settings.json` or `<root>/config/settings.yaml`.
+
+In dev mode the project-level `.env` is loaded automatically, so you can keep secrets there while iterating locally. For desktop installs, place your configuration in `~/.parlanchina/config/settings.yaml` (or `.json`) so it travels with the desktop root. Example YAML:
+
+```yaml
+OPENAI_API_KEY: "sk-your-key"
+PARLANCHINA_MODELS:
+   - gpt-5.1
+   - gpt-5.1-mini
+PARLANCHINA_DEFAULT_MODEL: gpt-5.1-mini
+LOG_LEVEL: DEBUG
+```
+
+Set the following keys via the config file or environment variables:
 
 - `OPENAI_API_KEY` — required
 - `OPENAI_PROVIDER` — `openai` (default) or `azure`
@@ -117,6 +162,27 @@ Set these in `.env` (loaded via `python-dotenv`):
 - `LOG_FILE` — filename if `LOG_TYPE=file` (default: `parlanchina.log`)
 
 Logging defaults to console (`LOG_TYPE=stream`) with a timestamped format. Raise `LOG_LEVEL` to `DEBUG` when troubleshooting MCP/tool calls or image generation; drop to `INFO`/`WARNING` for quieter runs. If you prefer log files, set `LOG_TYPE=file` and point `LOG_FILE` at your target path.
+
+### Runtime roots: desktop vs. dev
+
+Parlanchina keeps all writable state beneath a mode-specific root. The CLI resolves the root in this order:
+
+1. `--root /custom/path`
+2. `PARLANCHINA_ROOT=/custom/path`
+3. Default per mode (see below)
+
+| Mode      | Default root                                  | Notes |
+|-----------|-----------------------------------------------|-------|
+| `desktop` | `~/.parlanchina`                              | Used by the PyWebView wrapper; survives app upgrades and works well with packaged binaries. |
+| `dev`     | Current working directory (the repo by default) | Mirrors the historic “run from source” behavior. |
+
+Under whichever root is active, Parlanchina ensures these directories exist:
+
+- `<root>/logs/app.log` — consolidated log output based on your `LOG_*` choices
+- `<root>/data/` — session JSON and generated images (`data/sessions`, `data/images`)
+- `<root>/config/` — user overrides such as `settings.json` or `settings.yaml`
+
+Desktop mode additionally mirrors selected config values into environment variables at launch so LLM credentials set in `settings.json` apply without exporting them globally. In dev mode, the `.env` file in the project root remains the preferred way to store secrets.
 
 ### MCP configuration
 
@@ -154,7 +220,7 @@ Parlanchina connects to MCP servers via [FastMCP](https://pypi.org/project/fastm
 
 Parlanchina supports two execution modes:
 
-- **Ask mode** (default): single-shot response. Only internal tools (e.g., image generation) are available, and MCP tools are excluded.
+- **Ask mode** (default): single-shot response with no automatic tool execution. The model replies directly without invoking internal or MCP tools.
 - **Agent mode**: multi-step tool orchestration. Both internal and MCP tools are available (based on your Toolbox selection). The agent loops model → tool calls → model until it finishes or hits limits.
 
 ![Toolbox](images/toolbox.png)
@@ -195,6 +261,7 @@ You can switch modes and select tools in the Toolbox (above the input). Only the
    - All chat history is kept in `data/sessions/` as JSON.
 
 ## Documentation
+
 - Functional notes: [`doc/functional-doc.md`](doc/functional-doc.md)
 - Technical notes: [`doc/technicl-doc.md`](doc/technicl-doc.md)
 
