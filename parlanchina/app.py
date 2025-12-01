@@ -8,6 +8,7 @@ from flask import Flask
 from parlanchina.config import load_config
 from parlanchina.paths import Mode, detect_mode
 from parlanchina.utils.banner import load_banner_html
+from parlanchina.utils.config_view import build_config_html
 
 _DESKTOP_ENV_KEYS = {
     "OPENAI_API_KEY",
@@ -80,8 +81,9 @@ def create_app(app_root: Path, dirs: dict) -> Flask:
     config_values: dict[str, Any] = dict(raw_config)
 
     mode = detect_mode()
+    injected_env_keys: set[str] = set()
     if mode == Mode.DESKTOP:
-        _apply_desktop_config_env(config_values)
+        injected_env_keys = _apply_desktop_config_env(config_values)
 
     log_options = _resolve_logging_options(config_values)
     _configure_logging(dirs["logs"], log_options)
@@ -116,6 +118,23 @@ def create_app(app_root: Path, dirs: dict) -> Flask:
     app.config["RAW_CONFIG"] = raw_config
     app.config["BANNER_HTML"] = load_banner_html()
 
+    env_snapshot_keys = set(_DESKTOP_ENV_KEYS)
+    env_snapshot_keys.update({
+        "PARLANCHINA_MODE",
+        "PARLANCHINA_ROOT",
+    })
+    env_snapshot = {
+        key: value
+        for key in sorted(env_snapshot_keys)
+        if (value := os.environ.get(key))
+    }
+
+    app.config["CONFIG_HTML"] = build_config_html(
+        config_values,
+        env_snapshot,
+        injected_env_keys,
+    )
+
     from parlanchina.routes import bp as base_routes
     from parlanchina.mcp_routes import bp as mcp_bp
 
@@ -126,6 +145,7 @@ def create_app(app_root: Path, dirs: dict) -> Flask:
     def _inject_banner() -> dict[str, Any]:
         return {
             "banner_html": app.config.get("BANNER_HTML", ""),
+            "config_html": app.config.get("CONFIG_HTML", ""),
         }
 
     return app
@@ -135,9 +155,10 @@ def _parse_models(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
-def _apply_desktop_config_env(config_values: dict[str, Any]) -> None:
+def _apply_desktop_config_env(config_values: dict[str, Any]) -> set[str]:
     """Populate environment defaults from desktop configuration when unset."""
 
+    injected: set[str] = set()
     for key in _DESKTOP_ENV_KEYS:
         if os.getenv(key):
             continue
@@ -153,6 +174,9 @@ def _apply_desktop_config_env(config_values: dict[str, Any]) -> None:
         if not serialized:
             continue
         os.environ[key] = serialized
+        injected.add(key)
+
+    return injected
 
 
 def _resolve_logging_options(config_values: dict[str, Any]) -> dict[str, str]:
