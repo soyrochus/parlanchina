@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 
-# Parlanchina startup script
-# Launches the application in dev mode through the package entry point
+# Parlanchina desktop startup script
+# Launches the desktop mode through the package entry point
 
 set -e
 
-# Change to the script's directory
 cd "$(dirname "$0")"
 
-# Check if uv is available
 if ! command -v uv &> /dev/null; then
     echo "Error: uv is not installed"
     echo ""
@@ -17,7 +15,6 @@ if ! command -v uv &> /dev/null; then
     exit 1
 fi
 
-# Check if virtual environment exists
 if [ ! -d ".venv" ]; then
     echo "Error: Virtual environment not found at .venv"
     echo ""
@@ -26,5 +23,5 @@ if [ ! -d ".venv" ]; then
     exit 1
 fi
 
-echo "Starting Parlanchina dev mode with uv..."
-uv run -m parlanchina dev "$@"
+echo "Starting Parlanchina desktop mode with uv..."
+uv run -m parlanchina desktop "$@"

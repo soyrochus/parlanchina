@@ -1,14 +1,12 @@
 #!/usr/bin/env pwsh
 
-# Parlanchina startup script
-# Launches the application in dev mode through the package entry point
+# Parlanchina desktop startup script
+# Launches the desktop mode through the package entry point
 
 $ErrorActionPreference = "Stop"
 
-# Change to the script's directory
 Set-Location -Path $PSScriptRoot
 
-# Check if uv is available
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Host "Error: uv is not installed" -ForegroundColor Red
     Write-Host ""
@@ -17,7 +15,6 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# Check if virtual environment exists
 if (-not (Test-Path ".venv")) {
     Write-Host "Error: Virtual environment not found at .venv" -ForegroundColor Red
     Write-Host ""
@@ -26,5 +23,5 @@ if (-not (Test-Path ".venv")) {
     exit 1
 }
 
-Write-Host "Starting Parlanchina dev mode with uv..." -ForegroundColor Green
-uv run -m parlanchina dev @Args
+Write-Host "Starting Parlanchina desktop mode with uv..." -ForegroundColor Green
+uv run -m parlanchina desktop @Args
