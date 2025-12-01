@@ -47,6 +47,41 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     };
 
+  const applySyntaxHighlighting = (container) => {
+    if (!container || typeof window.hljs === 'undefined') {
+      return;
+    }
+    container.querySelectorAll('pre code').forEach((block) => {
+      try {
+        window.hljs.highlightElement(block);
+      } catch (err) {
+        console.debug('Highlighting failed', err);
+      }
+    });
+  };
+
+  const openMarkdownModal = (rawText) => {
+    if (!rawText) {
+      return;
+    }
+    const rendered = sanitizeMarkdown(rawText);
+    const modalApi = window.parlanchinaModal;
+    if (modalApi && typeof modalApi.open === 'function') {
+      modalApi.open({
+        type: 'markdown',
+        htmlContent: rendered,
+        title: 'View message source',
+      });
+      return;
+    }
+    // Fallback: open in a new tab if modal API is unavailable
+    const fallbackWindow = window.open('', '_blank', 'noopener,noreferrer');
+    if (fallbackWindow) {
+      fallbackWindow.document.write(rendered);
+      fallbackWindow.document.close();
+    }
+  };
+
   const toolPanel = document.getElementById("tool-panel");
   const toolListEl = document.getElementById("tool-list");
   const toolStatusEl = document.getElementById("tool-status");
@@ -608,6 +643,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       wrapMermaidDiagrams(content);
       wrapGeneratedImages(content, wrapper, []);
+      applySyntaxHighlighting(content);
     });
   };
 
@@ -633,14 +669,20 @@ document.addEventListener("DOMContentLoaded", () => {
     messageWrapper.dataset.isMermaidPending = 'false';
     messageWrapper.dataset.isRenderingImage = 'false';
     messageWrapper.dataset.imageIndicatorShown = 'false';
+    messageWrapper.dataset.rawText = '';
 
     const contentDiv = document.createElement("div");
     contentDiv.className = "prose prose-slate dark:prose-invert max-w-none px-4 pt-3 pb-1";
     contentDiv.innerHTML = `<p class="text-sm text-slate-500">Thinking...</p>`;
     
     const footerDiv = document.createElement("div");
-    footerDiv.className = "px-4 pb-3 pt-1 flex items-center";
+    footerDiv.className = "px-4 pb-3 pt-1 flex items-center gap-2";
     footerDiv.innerHTML = `
+      <button class="view-source-btn text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors" title="View rendered source">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>
+        </svg>
+      </button>
       <button class="copy-btn text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors" title="Copy to clipboard">
         <svg class="copy-icon w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
@@ -700,12 +742,14 @@ document.addEventListener("DOMContentLoaded", () => {
         ? '<p class="text-sm text-slate-500 mb-2">Generating image...</p>'
         : '';
       contentDiv.innerHTML = prefix + safeHtml;
+      messageWrapper.dataset.rawText = buffer;
       wrapMermaidDiagrams(contentDiv);
       wrapGeneratedImages(contentDiv, messageWrapper, pendingImages);
       if (hasMermaid) {
         setRenderingState(messageWrapper, true);
       }
       runMermaid();
+      applySyntaxHighlighting(contentDiv);
       messagesEl.scrollTop = messagesEl.scrollHeight;
     };
 
@@ -799,6 +843,7 @@ document.addEventListener("DOMContentLoaded", () => {
         wrapMermaidDiagrams(contentDiv);
         pendingImages = collectedImages.map((img) => ({ ...img, status: 'done' }));
         wrapGeneratedImages(contentDiv, messageWrapper, pendingImages);
+        applySyntaxHighlighting(contentDiv);
         if (hasMermaid) {
           try {
             await runMermaid();
@@ -1135,6 +1180,26 @@ document.addEventListener("DOMContentLoaded", () => {
   
   // Initialize session management
   initSessionManagement();
+  
+  // View source modal functionality
+  const initViewSourceButtons = () => {
+    document.addEventListener('click', (e) => {
+      const viewBtn = e.target.closest('.view-source-btn');
+      if (!viewBtn) return;
+      
+      e.preventDefault();
+      
+      const messageWrapper = viewBtn.closest('.assistant-message-wrapper');
+      if (!messageWrapper) return;
+      
+      const rawText = messageWrapper.dataset.rawText || messageWrapper.getAttribute('data-raw-text');
+      if (!rawText) return;
+      
+      openMarkdownModal(rawText);
+    });
+  };
+  
+  initViewSourceButtons();
   
   // Copy to clipboard functionality
   const initCopyButtons = () => {

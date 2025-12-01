@@ -4,12 +4,14 @@
   const closeBtn = document.getElementById('mermaid-modal-close');
   const zoomSlider = document.getElementById('mermaid-zoom-slider');
   const zoomValue = document.getElementById('mermaid-zoom-value');
+  const modalFooter = modal.querySelector('.mermaid-modal-footer');
+  const modalTitle = document.getElementById('mermaid-modal-title');
   
   let currentDiagramContainer = null;
   let currentType = 'mermaid'; // mermaid | image
   let currentImage = null;
   
-  const openModal = async ({ type, mermaidSource, imageSrc, imageAlt }) => {
+  const openModal = async ({ type, mermaidSource, imageSrc, imageAlt, htmlContent, title }) => {
     // Clear previous content
     modalBody.innerHTML = '';
     
@@ -17,73 +19,94 @@
     currentImage = null;
     currentType = type;
 
+    const heading = title || (type === 'markdown' ? 'View message source' : 'Zoom view');
+    if (modalTitle) {
+      modalTitle.textContent = heading;
+    }
+
+    modalBody.classList.toggle('markdown-view', type === 'markdown');
+    modalFooter.classList.toggle('hidden', type === 'markdown');
+    zoomSlider.disabled = type === 'markdown';
+
     // Create a container for zoomable content
     const container = document.createElement('div');
-    container.className = 'mermaid-diagram-container';
-    container.style.transformOrigin = 'center center';
-    container.style.transition = 'transform 0.2s ease';
 
-    if (type === 'mermaid') {
-      const pre = document.createElement('pre');
-      pre.className = 'mermaid';
-      pre.textContent = mermaidSource || '';
-      container.appendChild(pre);
+    if (type === 'markdown') {
+      container.className = 'markdown-modal-content prose prose-slate dark:prose-invert max-w-none';
+      container.innerHTML = htmlContent || '<p class="text-sm text-slate-500">No content available.</p>';
       modalBody.appendChild(container);
-      currentDiagramContainer = container;
-    } else if (type === 'image') {
-      const img = document.createElement('img');
-      img.src = imageSrc || '';
-      if (imageAlt) img.alt = imageAlt;
-      
-      // Apply intelligent modal sizing for images
-      img.onload = () => {
-        const naturalWidth = img.naturalWidth;
-        const naturalHeight = img.naturalHeight;
-        const aspectRatio = naturalWidth / naturalHeight;
+      if (window.hljs) {
+        container.querySelectorAll('pre code').forEach((block) => window.hljs.highlightElement(block));
+      }
+    } else {
+      container.className = 'mermaid-diagram-container';
+      container.style.transformOrigin = 'center center';
+      container.style.transition = 'transform 0.2s ease';
+
+      if (type === 'mermaid') {
+        const pre = document.createElement('pre');
+        pre.className = 'mermaid';
+        pre.textContent = mermaidSource || '';
+        container.appendChild(pre);
+        modalBody.appendChild(container);
+        currentDiagramContainer = container;
+      } else if (type === 'image') {
+        const img = document.createElement('img');
+        img.src = imageSrc || '';
+        if (imageAlt) img.alt = imageAlt;
         
-        // Modal sizing constraints
-        const maxModalWidth = Math.min(window.innerWidth * 0.8, 1200);
-        const maxModalHeight = Math.min(window.innerHeight * 0.7, 800);
-        
-        let displayWidth = naturalWidth;
-        let displayHeight = naturalHeight;
-        
-        // Scale down if too large for modal
-        if (naturalWidth > maxModalWidth || naturalHeight > maxModalHeight) {
-          const scale = Math.min(maxModalWidth / naturalWidth, maxModalHeight / naturalHeight);
-          displayWidth = naturalWidth * scale;
-          displayHeight = naturalHeight * scale;
-        }
-        
-        // Ensure minimum readable size in modal
-        const minModalSize = 300;
-        if (displayWidth < minModalSize && displayHeight < minModalSize) {
-          if (aspectRatio >= 1) {
-            displayWidth = minModalSize;
-            displayHeight = minModalSize / aspectRatio;
-          } else {
-            displayHeight = minModalSize;
-            displayWidth = minModalSize * aspectRatio;
+        // Apply intelligent modal sizing for images
+        img.onload = () => {
+          const naturalWidth = img.naturalWidth;
+          const naturalHeight = img.naturalHeight;
+          const aspectRatio = naturalWidth / naturalHeight;
+          
+          // Modal sizing constraints
+          const maxModalWidth = Math.min(window.innerWidth * 0.8, 1200);
+          const maxModalHeight = Math.min(window.innerHeight * 0.7, 800);
+          
+          let displayWidth = naturalWidth;
+          let displayHeight = naturalHeight;
+          
+          // Scale down if too large for modal
+          if (naturalWidth > maxModalWidth || naturalHeight > maxModalHeight) {
+            const scale = Math.min(maxModalWidth / naturalWidth, maxModalHeight / naturalHeight);
+            displayWidth = naturalWidth * scale;
+            displayHeight = naturalHeight * scale;
           }
-        }
+          
+          // Ensure minimum readable size in modal
+          const minModalSize = 300;
+          if (displayWidth < minModalSize && displayHeight < minModalSize) {
+            if (aspectRatio >= 1) {
+              displayWidth = minModalSize;
+              displayHeight = minModalSize / aspectRatio;
+            } else {
+              displayHeight = minModalSize;
+              displayWidth = minModalSize * aspectRatio;
+            }
+          }
+          
+          img.style.width = Math.round(displayWidth) + 'px';
+          img.style.height = Math.round(displayHeight) + 'px';
+          img.style.maxWidth = '90vw';
+          img.style.maxHeight = '80vh';
+          img.style.objectFit = 'contain';
+        };
         
-        img.style.width = Math.round(displayWidth) + 'px';
-        img.style.height = Math.round(displayHeight) + 'px';
-        img.style.maxWidth = '90vw';
-        img.style.maxHeight = '80vh';
-        img.style.objectFit = 'contain';
-      };
-      
-      container.appendChild(img);
-      modalBody.appendChild(container);
-      currentDiagramContainer = container;
-      currentImage = img;
+        container.appendChild(img);
+        modalBody.appendChild(container);
+        currentDiagramContainer = container;
+        currentImage = img;
+      }
     }
 
     // Reset zoom slider
     zoomSlider.value = 100;
     zoomValue.textContent = '100%';
-    container.style.transform = 'scale(1)';
+    if (currentDiagramContainer) {
+      currentDiagramContainer.style.transform = 'scale(1)';
+    }
     
     // Show modal
     modal.classList.remove('hidden');
@@ -139,11 +162,15 @@
     modal.classList.add('hidden');
     document.body.style.overflow = '';
     modalBody.innerHTML = '';
+    modalBody.classList.remove('markdown-view');
+    modalFooter.classList.remove('hidden');
+    zoomSlider.disabled = false;
     currentDiagramContainer = null;
   };
   
   // Zoom slider handler
   zoomSlider.addEventListener('input', (e) => {
+    if (zoomSlider.disabled) return;
     const zoomLevel = e.target.value;
     zoomValue.textContent = `${zoomLevel}%`;
     
@@ -199,4 +226,9 @@
       openModal({ type: 'image', imageSrc: img.src, imageAlt: img.alt });
     }
   });
+
+  window.parlanchinaModal = {
+    open: openModal,
+    close: closeModal,
+  };
 })();
