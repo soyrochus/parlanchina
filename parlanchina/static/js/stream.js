@@ -134,7 +134,9 @@ document.addEventListener("DOMContentLoaded", () => {
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
       .forEach((tool) => {
-        const row = makeCheckbox(tool, toolState.draftInternal.has(tool.id), false, "internal");
+        const isChecked = toolState.draftInternal.has(tool.id);
+        const isDisabled = toolState.modeDraft === "ask"; // Disable in ask mode, enable in agent mode
+        const row = makeCheckbox(tool, isChecked, isDisabled, "internal");
         internalList.appendChild(row);
       });
     internalSection.appendChild(internalList);
@@ -152,7 +154,7 @@ document.addEventListener("DOMContentLoaded", () => {
     mcpNote.className = "text-xs text-slate-500 dark:text-slate-400";
     if (!toolState.mcpEnabled) {
       mcpNote.textContent = toolState.mcpReason || "MCP disabled";
-    } else if (!modeIsAgent) {
+    } else if (toolState.modeDraft === "ask") {
       mcpNote.textContent = "Enable Agent mode to use MCP tools";
     }
     if (mcpNote.textContent) {
@@ -160,7 +162,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     mcpSection.appendChild(mcpHeader);
 
-    const disableMcp = !toolState.mcpEnabled || !modeIsAgent;
+    const disableMcp = !toolState.mcpEnabled || toolState.modeDraft === "ask";
     const grouped = toolState.mcp.reduce((acc, tool) => {
       acc[tool.server] = acc[tool.server] || [];
       acc[tool.server].push(tool);

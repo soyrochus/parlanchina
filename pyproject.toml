@@ -15,4 +15,7 @@ dependencies = [
     "asgiref>=3.7.0",
     "postgres-mcp>=0.3.0",
     "pywebview>=6.1",
+    "qtpy>=2.4.3",
+    "pyqt5>=5.15.11",
+    "pyqtwebengine>=5.15.7",
 ]

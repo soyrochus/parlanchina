@@ -139,9 +139,9 @@ def _apply_desktop_config_env(config_values: dict[str, Any]) -> None:
         if value is None:
             continue
         if isinstance(value, (list, tuple)):
-            serialized = ",".join(str(item).strip() for item in value if str(item).strip())
+            serialized = ",".join(_stringify(item) for item in value if _stringify(item))
         else:
-            serialized = str(value).strip()
+            serialized = _stringify(value)
         if not serialized:
             continue
         os.environ[key] = serialized
@@ -151,16 +151,18 @@ def _resolve_logging_options(config_values: dict[str, Any]) -> dict[str, str]:
     options: dict[str, str] = {}
     for key, default in _LOG_DEFAULTS.items():
         env_value = os.getenv(key)
-        if env_value is not None and str(env_value).strip() != "":
-            options[key] = str(env_value).strip()
+        cleaned_env = _stringify(env_value) if env_value is not None else ""
+        if cleaned_env:
+            options[key] = cleaned_env
             continue
         config_value = config_values.get(key)
         if isinstance(config_value, (list, tuple)):
-            config_value = ",".join(str(item).strip() for item in config_value if str(item).strip())
-        if config_value is None or str(config_value).strip() == "":
+            config_value = ",".join(_stringify(item) for item in config_value if _stringify(item))
+        cleaned_config = _stringify(config_value) if config_value is not None else ""
+        if not cleaned_config:
             options[key] = default
         else:
-            options[key] = str(config_value).strip()
+            options[key] = cleaned_config
     return options
 
 
@@ -186,3 +188,14 @@ def _resolve_default_model(config_values: dict[str, Any]) -> str:
     if config_value is None:
         return ""
     return str(config_value)
+
+
+def _stringify(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return ",".join(_stringify(item) for item in value if _stringify(item))
+    text = str(value).strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        text = text[1:-1].strip()
+    return text

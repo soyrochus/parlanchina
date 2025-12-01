@@ -128,7 +128,8 @@ async def stream_response(
     mcp_tools = mcp_tools or []
 
     if mode != "agent":
-        async for event in _stream_ask_mode(messages, model, enable_image_tool="internal.image" in set(internal_tools)):
+        # Ask mode: never pass tools to LLM, regardless of what's enabled in UI
+        async for event in _stream_ask_mode(messages, model, enable_image_tool=False):
             yield event
         return
 
@@ -377,6 +378,15 @@ async def _stream_agent_mode(
                         result_text = f"Tool {tool_name} is disabled for this turn."
                     else:
                         result_text = await _run_internal_tool(resolved_tool_id, args)
+                        # Emit image events for internal image tools
+                        if resolved_tool_id == "internal.image":
+                            image_results = _get_and_clear_agent_image_results()
+                            for img in image_results:
+                                yield LLMEvent(
+                                    type="image_call",
+                                    image_b64=None,  # Already saved to file
+                                    image_params={"prompt": img["prompt"], "size": img["size"], "url_path": img["url_path"]},
+                                )
                 else:
                     if resolved_tool_id not in enabled_mcp:
                         result_text = f"Tool {tool_name} is disabled for this turn."
@@ -478,6 +488,15 @@ async def _stream_agent_mode(
                             result_text = f"Tool {tool_name} is disabled for this turn."
                         else:
                             result_text = await _run_internal_tool(resolved_tool_id, args)
+                            # Emit image events for internal image tools in summary phase too
+                            if resolved_tool_id == "internal.image":
+                                image_results = _get_and_clear_agent_image_results()
+                                for img in image_results:
+                                    yield LLMEvent(
+                                        type="image_call",
+                                        image_b64=None,  # Already saved to file
+                                        image_params={"prompt": img["prompt"], "size": img["size"], "url_path": img["url_path"]},
+                                    )
                     else:
                         if resolved_tool_id not in enabled_mcp:
                             result_text = f"Tool {tool_name} is disabled for this turn."
@@ -543,7 +562,6 @@ async def _build_agent_tool_payloads(
         safe_name = _safe_tool_name(definition["id"], used_names)
         used_names.add(safe_name)
         name_map[safe_name] = definition["id"]
-        name_map[definition["id"]] = definition["id"]
         payloads.append(
             {
                 "type": "function",
@@ -563,7 +581,6 @@ async def _build_agent_tool_payloads(
         safe_name = _safe_tool_name(definition["full_name"], used_names)
         used_names.add(safe_name)
         name_map[safe_name] = definition["full_name"]
-        name_map[definition["full_name"]] = definition["full_name"]
         payloads.append(
             {
                 "type": "function",
@@ -632,13 +649,35 @@ async def _run_internal_image_tool(args: dict) -> str:
         url = getattr(data, "url", None) if data else None
         if b64_content:
             meta = image_store.save_image_from_base64(b64_content)
-            return f"Generated image:\n\n![{prompt}]({meta.url_path})"
+            # Store image info for later event emission
+            _store_agent_image_result(meta.url_path, prompt, size)
+            # Return just text description, not markdown (event will handle the image)
+            return f"Image generated successfully with prompt: {prompt}"
         if url:
             return f"Generated image:\n\n![{prompt}]({url})"
         return "Image generation failed: empty response."
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("Internal image tool failed")
         return f"Image generation failed: {exc}"
+
+
+# Global storage for agent mode image results
+_agent_image_results: list[dict] = []
+
+def _store_agent_image_result(url_path: str, prompt: str, size: str):
+    """Store image result for agent mode to emit as image_call event."""
+    _agent_image_results.append({
+        "url_path": url_path,
+        "prompt": prompt,
+        "size": size
+    })
+
+def _get_and_clear_agent_image_results() -> list[dict]:
+    """Get and clear stored image results."""
+    global _agent_image_results
+    results = _agent_image_results.copy()
+    _agent_image_results.clear()
+    return results
 
 
 def _parse_tool_args(raw_args: Any) -> dict:

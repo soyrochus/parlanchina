@@ -96,13 +96,16 @@ def stream_response(session_id: str):
     app = current_app._get_current_object()
     mode = chat_store.get_mode(session_id)
 
-    # Internal tools default: all
+    # Tool enablement: tools are shown as enabled in UI but not sent to LLM in ask mode
     internal_enabled = chat_store.get_enabled_internal_tools(session_id)
     if internal_enabled is None:
         internal_enabled = internal_tools.all_tool_ids()
         chat_store.set_enabled_internal_tools(session_id, internal_enabled)
+    
+    # In ask mode, don't pass tools to LLM (they're just for UI display)
+    llm_internal_tools = internal_enabled if mode == "agent" else []
 
-    # MCP tools only when in agent mode and MCP is available
+    # MCP tools: only enabled in agent mode (disabled in ask mode)
     mcp_enabled_tools: list[str] = []
     if mode == "agent" and mcp_manager.is_enabled():
         enabled_tools = chat_store.get_enabled_mcp_tools(session_id)
@@ -131,7 +134,7 @@ def stream_response(session_id: str):
                 payload_messages,
                 model,
                 mode=mode,
-                internal_tools=internal_enabled,
+                internal_tools=llm_internal_tools,
                 mcp_tools=mcp_enabled_tools,
             )
             while True:
@@ -145,29 +148,53 @@ def stream_response(session_id: str):
                     elif event.type == "image_start":
                         yield json.dumps({"type": "image_start"}) + "\n"
                     elif event.type == "image_call":
-                        if not event.image_b64:
-                            continue
-                        try:
-                            meta = image_store.save_image_from_base64(event.image_b64)
-                            alt_text = _derive_alt_text(event.image_params)
-                            image_payload = {"url": meta.url_path, "alt_text": alt_text}
-                            images.append(image_payload)
-                            addition = f"\n\n![{alt_text}]({meta.url_path})\n"
-                            text_buffer += addition
-                            yield (
-                                json.dumps(
-                                    {
-                                        "type": "image",
-                                        "url": meta.url_path,
-                                        "alt_text": alt_text,
-                                        "markdown": addition,
-                                    }
+                        # Handle both cases: image_b64 (need to save) or already saved (from agent mode)
+                        if event.image_b64:
+                            # Standard case: save the image from base64
+                            try:
+                                meta = image_store.save_image_from_base64(event.image_b64)
+                                alt_text = _derive_alt_text(event.image_params)
+                                image_payload = {"url": meta.url_path, "alt_text": alt_text}
+                                images.append(image_payload)
+                                addition = f"\n\n![{alt_text}]({meta.url_path})\n"
+                                text_buffer += addition
+                                yield (
+                                    json.dumps(
+                                        {
+                                            "type": "image",
+                                            "url": meta.url_path,
+                                            "alt_text": alt_text,
+                                            "markdown": addition,
+                                        }
+                                    )
+                                    + "\n"
                                 )
-                                + "\n"
-                            )
-                        except Exception as exc:  # pragma: no cover - safety
-                            logger.exception("Failed to persist generated image: %s", exc)
-                            yield json.dumps({"type": "error", "message": "Image save failed"}) + "\n"
+                            except Exception as exc:  # pragma: no cover - safety
+                                logger.exception("Failed to persist generated image: %s", exc)
+                                yield json.dumps({"type": "error", "message": "Image save failed"}) + "\n"
+                        elif event.image_params and event.image_params.get("url_path"):
+                            # Agent mode case: image already saved, just emit the markdown
+                            try:
+                                url_path = event.image_params["url_path"]
+                                alt_text = _derive_alt_text(event.image_params)
+                                image_payload = {"url": url_path, "alt_text": alt_text}
+                                images.append(image_payload)
+                                addition = f"\n\n![{alt_text}]({url_path})\n"
+                                text_buffer += addition
+                                yield (
+                                    json.dumps(
+                                        {
+                                            "type": "image",
+                                            "url": url_path,
+                                            "alt_text": alt_text,
+                                            "markdown": addition,
+                                        }
+                                    )
+                                    + "\n"
+                                )
+                            except Exception as exc:  # pragma: no cover - safety
+                                logger.exception("Failed to handle pre-saved image: %s", exc)
+                                yield json.dumps({"type": "error", "message": "Image handling failed"}) + "\n"
                     elif event.type == "error":
                         error_message = event.text or "LLM error"
                         analysis = ""

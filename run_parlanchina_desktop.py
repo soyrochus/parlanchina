@@ -1,8 +1,11 @@
 import argparse
 import os
 import threading
+import platform
+import webbrowser
 
 import webview
+from webview.errors import WebViewException
 
 from parlanchina.app import create_app
 from parlanchina.paths import Mode, ensure_app_dirs, get_app_root
@@ -16,7 +19,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def start_flask(cli_root):
+def start_flask(cli_root: str | None):
     os.environ.setdefault("PARLANCHINA_MODE", "desktop")
 
     root = get_app_root(mode=Mode.DESKTOP, cli_root=cli_root)
@@ -24,6 +27,24 @@ def start_flask(cli_root):
 
     app = create_app(root, dirs)
     app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)
+
+
+def start_ui():
+    system = platform.system().lower()
+
+    # Decide backend: force Qt only on Linux, let pywebview choose elsewhere
+    gui_backend: str | None = None
+    if system == "linux":
+        gui_backend = "qt"
+
+    try:
+        webview.create_window("Parlanchina", f"http://127.0.0.1:{PORT}")
+        # On Linux this uses Qt, on macOS/Windows it uses the native default
+        webview.start(gui=gui_backend)
+    except WebViewException as e:
+        # Graceful fallback: open default browser instead of crashing
+        print(f"[Parlanchina] WebView failed ({e!r}), falling back to browser")
+        webbrowser.open(f"http://127.0.0.1:{PORT}")
 
 
 if __name__ == "__main__":
@@ -36,5 +57,4 @@ if __name__ == "__main__":
     )
     flask_thread.start()
 
-    webview.create_window("Parlanchina", f"http://127.0.0.1:{PORT}")
-    webview.start()
+    start_ui()
