@@ -1,14 +1,22 @@
 document.addEventListener("DOMContentLoaded", () => {
-  const form = document.getElementById("chat-form");
-  const messagesEl = document.getElementById("messages");
-  const textarea = document.getElementById("message-input");
-  const modelSelect = document.getElementById("model-select");
-  const sessionTitleEl = document.querySelector("h1"); // Main session title
-  
-  const md = window.markdownit({
-    linkify: true,
-    breaks: true,
-  });
+  // Wait for libraries to be loaded
+  const initializeApp = () => {
+    // Check for required libraries
+    if (typeof markdownit === 'undefined') {
+      console.error('[Parlanchina] markdown-it library not loaded');
+      return;
+    }
+    
+    const form = document.getElementById("chat-form");
+    const messagesEl = document.getElementById("messages");
+    const textarea = document.getElementById("message-input");
+    const modelSelect = document.getElementById("model-select");
+    const sessionTitleEl = document.querySelector("h1"); // Main session title
+    
+    const md = window.markdownit({
+      linkify: true,
+      breaks: true,
+    });
 
   const toolPanel = document.getElementById("tool-panel");
   const toolListEl = document.getElementById("tool-list");
@@ -1069,4 +1077,12 @@ document.addEventListener("DOMContentLoaded", () => {
   
   // Initialize copy buttons
   initCopyButtons();
+  }; // End of initializeApp
+  
+  // Wait for libraries to be ready, or start immediately if already loaded
+  if (typeof markdownit !== 'undefined') {
+    initializeApp();
+  } else {
+    document.addEventListener('parlanchina-libraries-ready', initializeApp);
+  }
 });
