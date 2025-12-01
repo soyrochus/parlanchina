@@ -1,12 +1,19 @@
 document.addEventListener("DOMContentLoaded", () => {
+  let appInitialized = false;
+
   // Wait for libraries to be loaded
   const initializeApp = () => {
-    // Check for required libraries
-    if (typeof markdownit === 'undefined') {
-      console.error('[Parlanchina] markdown-it library not loaded');
+    if (appInitialized) {
       return;
     }
-    
+
+    // Check for required libraries
+    if (typeof markdownit === 'undefined' || typeof DOMPurify === 'undefined') {
+      return;
+    }
+
+    appInitialized = true;
+
     const form = document.getElementById("chat-form");
     const messagesEl = document.getElementById("messages");
     const textarea = document.getElementById("message-input");
@@ -17,6 +24,28 @@ document.addEventListener("DOMContentLoaded", () => {
       linkify: true,
       breaks: true,
     });
+
+    const sanitizeMarkdown = (text) => {
+      const rendered = md.render(text);
+      return DOMPurify.sanitize(rendered, {
+        ADD_TAGS: ['button', 'svg', 'path', 'img'],
+        ADD_ATTR: [
+          'stroke',
+          'stroke-linecap',
+          'stroke-linejoin',
+          'stroke-width',
+          'd',
+          'viewBox',
+          'fill',
+          'data-mermaid-source',
+          'src',
+          'alt',
+          'title',
+          'loading',
+          'decoding',
+        ],
+      });
+    };
 
   const toolPanel = document.getElementById("tool-panel");
   const toolListEl = document.getElementById("tool-list");
@@ -462,15 +491,21 @@ document.addEventListener("DOMContentLoaded", () => {
   const initializeExistingMessages = () => {
     document.querySelectorAll('.assistant-message-wrapper').forEach((wrapper) => {
       const content = wrapper.querySelector('.prose');
-      if (content) {
-        wrapMermaidDiagrams(content);
-        wrapGeneratedImages(content, wrapper, []);
+      if (!content) {
+        return;
       }
+      const rawText = wrapper.dataset.rawText;
+      if (rawText) {
+        const safeHtml = sanitizeMarkdown(rawText);
+        content.innerHTML = safeHtml;
+      }
+      wrapMermaidDiagrams(content);
+      wrapGeneratedImages(content, wrapper, []);
     });
   };
 
-  runMermaid();
   initializeExistingMessages();
+  runMermaid();
 
   const appendUserBubble = (content) => {
     const wrapper = document.createElement("div");
@@ -550,25 +585,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const renderBuffer = () => {
-      const rendered = md.render(buffer);
-      const safeHtml = DOMPurify.sanitize(rendered, {
-        ADD_TAGS: ['button', 'svg', 'path', 'img'],
-        ADD_ATTR: [
-          'stroke',
-          'stroke-linecap',
-          'stroke-linejoin',
-          'stroke-width',
-          'd',
-          'viewBox',
-          'fill',
-          'data-mermaid-source',
-          'src',
-          'alt',
-          'title',
-          'loading',
-          'decoding',
-        ],
-      });
+      const safeHtml = sanitizeMarkdown(buffer);
       const showImageIndicator =
         messageWrapper.dataset.imageIndicatorShown === 'true' &&
         messageWrapper.dataset.isRenderingImage === 'true';
@@ -1080,9 +1097,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }; // End of initializeApp
   
   // Wait for libraries to be ready, or start immediately if already loaded
-  if (typeof markdownit !== 'undefined') {
+  if (typeof markdownit !== 'undefined' && typeof DOMPurify !== 'undefined') {
     initializeApp();
   } else {
-    document.addEventListener('parlanchina-libraries-ready', initializeApp);
+    document.addEventListener('parlanchina-libraries-ready', initializeApp, { once: true });
   }
 });
