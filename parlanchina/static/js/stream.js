@@ -434,6 +434,58 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshOverlayVisibility(messageWrapper);
   };
 
+  const applyIntelligentImageSizing = (img) => {
+    if (!img || !img.complete) return;
+    
+    // Get natural dimensions
+    const naturalWidth = img.naturalWidth;
+    const naturalHeight = img.naturalHeight;
+    
+    if (naturalWidth === 0 || naturalHeight === 0) return;
+    
+    const aspectRatio = naturalWidth / naturalHeight;
+    const wrapper = img.closest('.generated-image-wrapper');
+    
+    // Define sizing constraints
+    const maxWidth = 800;
+    const maxHeight = 500;
+    const minWidth = 200;
+    const minHeight = 150;
+    
+    let targetWidth = naturalWidth;
+    let targetHeight = naturalHeight;
+    
+    // Apply maximum constraints first
+    if (naturalWidth > maxWidth || naturalHeight > maxHeight) {
+      const scaleDown = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight);
+      targetWidth = naturalWidth * scaleDown;
+      targetHeight = naturalHeight * scaleDown;
+    }
+    
+    // Apply minimum constraints
+    if (targetWidth < minWidth && aspectRatio >= 1) {
+      // Landscape or square images
+      targetWidth = minWidth;
+      targetHeight = minWidth / aspectRatio;
+    } else if (targetHeight < minHeight && aspectRatio < 1) {
+      // Portrait images
+      targetHeight = minHeight;
+      targetWidth = minHeight * aspectRatio;
+    }
+    
+    // Apply the sizing
+    img.style.width = Math.round(targetWidth) + 'px';
+    img.style.height = Math.round(targetHeight) + 'px';
+    img.style.maxWidth = '100%';
+    img.style.height = 'auto'; // Allow responsive behavior
+    
+    // Update wrapper constraints
+    if (wrapper) {
+      wrapper.style.maxWidth = Math.round(targetWidth) + 'px';
+      wrapper.style.width = 'fit-content';
+    }
+  };
+
   const ensureImageWrapper = (imgElement) => {
     if (!imgElement) return null;
     let wrapper = imgElement.closest('.generated-image-wrapper');
@@ -491,6 +543,9 @@ document.addEventListener("DOMContentLoaded", () => {
           const matching = pendingImages.find((item) => item.url === src);
           if (matching) matching.status = 'done';
           overlay?.classList.remove('visible');
+          
+          // Apply intelligent image sizing after load
+          applyIntelligentImageSizing(img);
         });
         img.addEventListener('error', () => {
           if (overlay) {
@@ -499,6 +554,11 @@ document.addEventListener("DOMContentLoaded", () => {
             if (text) text.textContent = 'Failed to load image';
           }
         });
+      }
+      
+      // Apply sizing to already-loaded images
+      if (img.complete && img.naturalWidth > 0) {
+        applyIntelligentImageSizing(img);
       }
 
       if (overlay) {

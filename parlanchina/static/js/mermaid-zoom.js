@@ -34,8 +34,46 @@
       const img = document.createElement('img');
       img.src = imageSrc || '';
       if (imageAlt) img.alt = imageAlt;
-      img.style.maxWidth = '100%';
-      img.style.height = 'auto';
+      
+      // Apply intelligent modal sizing for images
+      img.onload = () => {
+        const naturalWidth = img.naturalWidth;
+        const naturalHeight = img.naturalHeight;
+        const aspectRatio = naturalWidth / naturalHeight;
+        
+        // Modal sizing constraints
+        const maxModalWidth = Math.min(window.innerWidth * 0.8, 1200);
+        const maxModalHeight = Math.min(window.innerHeight * 0.7, 800);
+        
+        let displayWidth = naturalWidth;
+        let displayHeight = naturalHeight;
+        
+        // Scale down if too large for modal
+        if (naturalWidth > maxModalWidth || naturalHeight > maxModalHeight) {
+          const scale = Math.min(maxModalWidth / naturalWidth, maxModalHeight / naturalHeight);
+          displayWidth = naturalWidth * scale;
+          displayHeight = naturalHeight * scale;
+        }
+        
+        // Ensure minimum readable size in modal
+        const minModalSize = 300;
+        if (displayWidth < minModalSize && displayHeight < minModalSize) {
+          if (aspectRatio >= 1) {
+            displayWidth = minModalSize;
+            displayHeight = minModalSize / aspectRatio;
+          } else {
+            displayHeight = minModalSize;
+            displayWidth = minModalSize * aspectRatio;
+          }
+        }
+        
+        img.style.width = Math.round(displayWidth) + 'px';
+        img.style.height = Math.round(displayHeight) + 'px';
+        img.style.maxWidth = '90vw';
+        img.style.maxHeight = '80vh';
+        img.style.objectFit = 'contain';
+      };
+      
       container.appendChild(img);
       modalBody.appendChild(container);
       currentDiagramContainer = container;

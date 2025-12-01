@@ -401,6 +401,9 @@
       border: 1px solid rgba(148, 163, 184, 0.4);
       background: rgba(248, 250, 252, 0.9);
       margin-top: 0.75rem;
+      max-width: 100%;
+      width: fit-content;
+      max-height: 600px; /* Prevent excessively tall images */
     }
 
     .dark .generated-image-wrapper {
@@ -447,9 +450,27 @@
 
     .generated-image-wrapper img {
       display: block;
-      width: 100%;
+      max-width: 100%;
       height: auto;
       object-fit: contain;
+      /* Intelligent sizing based on content */
+      max-height: 500px;
+      width: auto;
+    }
+    
+    /* For very small images, ensure minimum readable size */
+    .generated-image-wrapper img[width] {
+      min-width: 200px;
+    }
+    
+    /* For very large images, constrain appropriately */
+    @media (max-width: 768px) {
+      .generated-image-wrapper {
+        max-height: 400px;
+      }
+      .generated-image-wrapper img {
+        max-height: 350px;
+      }
     }
 
     .rendering-indicator {
