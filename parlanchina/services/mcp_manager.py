@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from flask import current_app
+
+from parlanchina.paths import detect_mode, get_app_root
+
 logger = logging.getLogger(__name__)
 
 _fastmcp_spec = importlib.util.find_spec("fastmcp")
@@ -64,24 +68,50 @@ class _ServerConfig:
     transport: _TransportConfig
 
 
+CONFIG_FILENAME = "mcp.json"
+
 _config_error: str | None = None
 _servers: dict[str, _ServerConfig] = {}
+_config_path: Path | None = None
+_config_mtime: float | None = None
 
 
-def _load_config() -> dict[str, _ServerConfig]:
-    global _config_error
-    # Go up to project root: services -> parlanchina -> project root
-    path = Path(__file__).resolve().parent.parent.parent / "mcp.json"
+def _determine_config_directory() -> Path:
+    try:
+        app = current_app._get_current_object()
+        dirs = app.config.get("DIRS")
+        if isinstance(dirs, dict) and dirs.get("config"):
+            return Path(dirs["config"])
+    except RuntimeError:
+        # Outside of an application context; fall back to mode detection.
+        pass
+
+    mode = detect_mode()
+    root = get_app_root(mode=mode)
+    return root / "config"
+
+
+def _resolve_config_path() -> Path:
+    config_dir = _determine_config_directory()
+    candidate = config_dir / CONFIG_FILENAME
+    if candidate.exists():
+        return candidate
+
+    legacy = Path(__file__).resolve().parent.parent.parent / CONFIG_FILENAME
+    if legacy.exists():
+        return legacy
+    return candidate
+
+
+def _load_config_from_file(path: Path) -> tuple[dict[str, _ServerConfig], str | None]:
     if not path.exists():
-        _config_error = "mcp.json not found; MCP disabled"
-        return {}
+        return {}, f"mcp.json not found at {path}"
 
     try:
         raw_config = json.loads(path.read_text())
     except json.JSONDecodeError:
-        _config_error = "mcp.json is not valid JSON; MCP disabled"
-        logger.exception("Failed to decode mcp.json")
-        return {}
+        logger.exception("Failed to decode mcp.json at %s", path)
+        return {}, "mcp.json is not valid JSON; MCP disabled"
 
     servers_blob = raw_config.get("servers")
     if isinstance(servers_blob, dict):
@@ -102,7 +132,7 @@ def _load_config() -> dict[str, _ServerConfig]:
             }
             normalized.append(entry)
         servers_blob = normalized
-        logger.info("Loaded MCP config using map-style servers format")
+        logger.info("Loaded MCP config using map-style servers format from %s", path)
     if servers_blob is None and isinstance(raw_config.get("mcpServers"), dict):
         servers_blob = [
             {
@@ -119,11 +149,10 @@ def _load_config() -> dict[str, _ServerConfig]:
             for name, server_cfg in raw_config["mcpServers"].items()
             if isinstance(server_cfg, dict)
         ]
-        logger.info("Loaded MCP config using legacy mcpServers format")
+        logger.info("Loaded MCP config using legacy mcpServers format from %s", path)
 
     if not isinstance(servers_blob, list):
-        _config_error = "mcp.json missing 'servers' array; MCP disabled"
-        return {}
+        return {}, "mcp.json missing 'servers' array; MCP disabled"
 
     parsed_servers: dict[str, _ServerConfig] = {}
     for entry in servers_blob:
@@ -133,8 +162,27 @@ def _load_config() -> dict[str, _ServerConfig]:
         parsed_servers[parsed.name] = parsed
 
     if not parsed_servers:
-        _config_error = "No valid MCP servers configured"
-    return parsed_servers
+        return {}, "No valid MCP servers configured"
+    return parsed_servers, None
+
+
+def _ensure_servers_loaded() -> None:
+    global _servers, _config_error, _config_path, _config_mtime
+
+    path = _resolve_config_path()
+    try:
+        mtime = path.stat().st_mtime
+    except FileNotFoundError:
+        mtime = None
+
+    if _config_path == path and _config_mtime == mtime:
+        return
+
+    _config_path = path
+    _config_mtime = mtime
+    _servers, _config_error = _load_config_from_file(path)
+    if _config_error:
+        logger.warning("MCP configuration issue: %s", _config_error)
 
 
 def _parse_server(entry: dict[str, Any]) -> Optional[_ServerConfig]:
@@ -188,20 +236,20 @@ def _parse_server(entry: dict[str, Any]) -> Optional[_ServerConfig]:
     return _ServerConfig(name=name, description=description, transport=transport_cfg)
 
 
-_servers = _load_config()
-
-
 def is_enabled() -> bool:
+    _ensure_servers_loaded()
     return _fastmcp_available and bool(_servers)
 
 
 def disabled_reason() -> str | None:
+    _ensure_servers_loaded()
     if _fastmcp_available:
         return _config_error
     return "fastmcp is not installed"
 
 
 def list_servers() -> list[MCPServerSummary]:
+    _ensure_servers_loaded()
     return [
         MCPServerSummary(
             name=server.name,
@@ -213,21 +261,22 @@ def list_servers() -> list[MCPServerSummary]:
 
 
 def list_tools(server_name: str) -> list[MCPToolSummary]:
+    _ensure_servers_loaded()
     server = _servers.get(server_name)
     if not server:
         raise ValueError(f"Unknown MCP server: {server_name}")
     if not is_enabled():
         return []
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(_list_tools_async(server))
     else:
-        # Running inside an event loop; callers should use the async variant.
         raise RuntimeError("list_tools cannot be called from a running event loop; use list_tools_async")
 
 
 async def list_tools_async(server_name: str) -> list[MCPToolSummary]:
+    _ensure_servers_loaded()
     server = _servers.get(server_name)
     if not server:
         raise ValueError(f"Unknown MCP server: {server_name}")
@@ -238,6 +287,7 @@ async def list_tools_async(server_name: str) -> list[MCPToolSummary]:
 
 def list_all_tools() -> list[dict[str, Any]]:
     """Return flattened tools across all servers with stable ids."""
+    _ensure_servers_loaded()
     tools: list[dict[str, Any]] = []
     if not is_enabled():
         return tools
@@ -257,6 +307,7 @@ def list_all_tools() -> list[dict[str, Any]]:
 
 def get_tool_definition(tool_id: str) -> Optional[dict[str, Any]]:
     """Map a tool id like 'server.tool' to its full definition."""
+    _ensure_servers_loaded()
     if "." not in tool_id:
         return None
     server_name, tool_name = tool_id.split(".", 1)
@@ -280,6 +331,7 @@ def get_tool_definition(tool_id: str) -> Optional[dict[str, Any]]:
 
 async def get_tool_definition_async(tool_id: str) -> Optional[dict[str, Any]]:
     """Async variant for contexts that already run an event loop."""
+    _ensure_servers_loaded()
     if "." not in tool_id:
         return None
     server_name, tool_name = tool_id.split(".", 1)
@@ -302,6 +354,7 @@ async def get_tool_definition_async(tool_id: str) -> Optional[dict[str, Any]]:
 
 
 def call_tool(server_name: str, tool_name: str, args: dict[str, Any]) -> MCPToolResult:
+    _ensure_servers_loaded()
     server = _servers.get(server_name)
     if not server:
         raise ValueError(f"Unknown MCP server: {server_name}")
@@ -325,6 +378,7 @@ def call_tool(server_name: str, tool_name: str, args: dict[str, Any]) -> MCPTool
 
 
 async def call_tool_async(server_name: str, tool_name: str, args: dict[str, Any]) -> MCPToolResult:
+    _ensure_servers_loaded()
     server = _servers.get(server_name)
     if not server:
         raise ValueError(f"Unknown MCP server: {server_name}")
@@ -434,7 +488,6 @@ def _serialize_call_result(result: Any) -> Any:
     for attr in ("model_dump", "dict", "to_dict"):
         if hasattr(result, attr):
             try:
-                # Some model_dump variants accept kwargs; keep default.
                 candidate = getattr(result, attr)()
                 return _safe_json(candidate)
             except TypeError:

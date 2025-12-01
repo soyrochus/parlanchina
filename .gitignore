@@ -14,6 +14,7 @@ wheels/
 
 # Local config/data
 .env
+logs/
 data/
 backup/
 scratchpad.md

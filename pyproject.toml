@@ -14,4 +14,5 @@ dependencies = [
     "hypercorn>=0.16.0",
     "asgiref>=3.7.0",
     "postgres-mcp>=0.3.0",
+    "pywebview>=6.1",
 ]
