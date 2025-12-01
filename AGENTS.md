@@ -1,116 +1,221 @@
-You are a coding agent working on the Parlanchina project (a local Flask-based ChatGPT-like app). Your task is to implement a **new “view source” popup button** for each assistant reply in the chat UI.
+# AGENT SPEC: Desktop-only Security (Parlanchina)
 
-There is already:
-- A **copy-to-clipboard button** per reply that copies the plain text of that reply.
-- A **zoom popup mechanism** used for images and Mermaid diagrams (triggered by some zoom control, implemented with HTML + JS in the frontend).
+This document defines how a **code generation agent** (Copilot, Codex, etc.) must implement and preserve the security model that separates:
 
-Your new feature
-Add, for each assistant reply, a **small button next to the copy button** that opens a **modal popup** which:
-- Renders the **full content of that reply** as **markdown**, including:
-  - Headings
-  - Lists
-  - Code blocks with syntax highlighting
-- Is **read-only** (no editing)
-- Is **scrollable** if the content is long
-- Uses the **same popup / overlay mechanism** as the current image / Mermaid zoom (no new modal framework)
-- Shows the content in a **fixed-width, code-friendly style** so code is clearly readable
+- **Desktop access** via PyWebView (allowed to call sensitive endpoints).
+- **Browser access** via normal web browsers (must be denied by default).
 
-High-level behavior
-1. For every assistant message rendered in `chat.html`, there should be:
-   - The existing copy-to-clipboard button (unchanged).
-   - A new “view source” button to its left or right (small icon; exact icon is up to you, but something like `</>` or a magnifier on paper is fine).
-2. Clicking this new button:
-   - Opens a popup overlay using the **same modal structure and JS logic** as the current zoom popup (do not invent a new modal pattern).
-   - The popup title can be something like “View message source” or “Rendered source”.
-   - The body of the popup shows the **rendered markdown** for that reply, including syntax-highlighted code.
-3. The popup must:
-   - Be read-only
-   - Allow vertical scrolling when content is taller than the viewport
-   - Use existing CSS as much as possible (reuse classes / styles used by the zoom popup and code blocks).
+The mechanism is based on:
 
-Technical guidance
+1. A per-process **desktop security token**.
+2. A custom **User-Agent** containing that token for PyWebView.
+3. A **Flask guard** that only allows requests with the correct token.
+4. A `PARLANCHINA_DEBUG=1` override that disables the guard for debugging.
 
-Frontend (HTML / JS)
-- In `templates/chat.html`:
-  - Locate the loop that renders each message in the conversation, including the existing copy-to-clipboard button and any metadata.
-  - For each **assistant reply**, add:
-    - A new button element with:
-      - A distinct CSS class, e.g. `view-source-btn`.
-      - A data attribute that uniquely identifies the message whose content must be shown, e.g. `data-message-id="{{ message.id }}"`, or `data-index="{{ loop.index0 }}"`, depending on what is already available.
-      - A small text/icon label like `</>` or `SRC`.
-  - Ensure the raw content for each message (before HTML escaping) is available to the frontend in some way so the popup can reconstruct the full markdown. You can:
-    - Embed the raw markdown in a hidden `<script type="application/json" ...>` block attached to the message container, or
-    - Use a `data-raw` attribute if safe and not too large, or
-    - Re-use whatever mechanism is already used by the copy-to-clipboard button, if that already has access to the raw message content.
+The token is **not user configurable**.
 
-- In `static/js/stream.js`:
-  - Find the existing event delegation / listeners for:
-    - Copy-to-clipboard button
-    - Zoom / Mermaid popup (if present here)
-  - Add a new click handler for the `.view-source-btn`:
-    - Identify the associated message container and retrieve the raw markdown content.
-    - Pass that content to a function that opens the popup in “markdown view” mode.
-  - If the zoom popup is controlled from another JS file (e.g. `mermaid-zoom.js`), expose or reuse a function to open the same modal with arbitrary HTML content, e.g.:
-    - `openModalWithContent(html)` or similar.
-    - If such a function does not exist, refactor the existing zoom logic so that:
-      - The modal opening, closing, and overlay behavior is in one reusable function.
-      - The zoomed image/Mermaid diagram is just one caller of that function.
-      - The new “view source” logic is another caller, providing a different HTML body.
-  - For the markdown rendering, you have two options:
-    1) If the **frontend already uses a JS markdown renderer** (e.g. marked.js) or a syntax highlighter (e.g. highlight.js), reuse that:
-       - Convert raw markdown to HTML on the client.
-       - Insert it into the modal content element.
-       - Run syntax highlighting if needed (e.g. `hljs.highlightAll()`).
-    2) If markdown is rendered **server-side** already (e.g. `utils/markdown.py`), and the HTML is available in the message container:
-       - You may inject the already-rendered HTML into the modal.
-       - Ensure it is not double-escaped.
-  - Make the modal content container scrollable via CSS:
-    - Set a max-height (e.g. `70vh`) and `overflow-y: auto` on the body area of the modal.
+---
 
-Existing modal reuse
-- Look at how the image / Mermaid zoom popup works:
-  - Identify:
-    - The modal HTML structure in the templates (probably in `base.html` or `chat.html`).
-    - The JS that:
-      - Opens the modal,
-      - Injects content (zoomed image/Mermaid),
-      - Closes the modal on overlay click/close button.
-  - Do not change its behavior for images/Mermaid.
-  - Extend that mechanism with a **new “mode”** or simply a new callsite that:
-    - Uses the same modal, but injects a scrollable `<div>` with rendered markdown/code instead of an image.
-- Keep a single modal in the DOM; do not create multiple overlays.
+## 1. Core rules (do not break)
 
-Styling
-- Use existing CSS classes if present for:
-  - Code blocks, e.g. `.code-block`, `pre code`, etc.
-  - Modal content and header.
-- If necessary, add minimal new CSS to:
-  - Make the modal body scrollable.
-  - Slightly adjust font to a monospace for code sections, while leaving markdown text as normal.
-- Do not introduce heavy new styling frameworks.
+Critical:
 
-Backend
-- Do not change backend logic unless necessary to expose the **raw message text** to the frontend.
-- If the frontend currently only sees HTML (after markdown rendering), and the copy-to-clipboard logic already has access to the raw text, reuse that same source.
-- If needed, extend the message serialization in `routes.py` to include `raw_text` and pass that through to the template.
+- The agent MUST NOT break any existing functionality!
 
-Acceptance criteria
-1. For each assistant reply in the chat:
-   - A new “view source” button appears next to the copy-to-clipboard button.
-2. Clicking the “view source” button:
-   - Opens the existing modal overlay.
-   - Shows the **full message content** rendered as markdown, including syntax-highlighted code blocks.
-   - The content is read-only and scrollable.
-3. Closing the modal returns to the normal chat view without affecting the rest of the UI.
-4. On both Mac and Linux (desktop browser), the behavior is consistent.
-5. Existing image / Mermaid zoom still works exactly as before.
+- The agent MUST TREAT all provided source code as EXAMPLES, NOT implementation instructions. 
 
-Implementation requirements
-- Do not rename or move existing files or directories.
-- Keep the implementation localized to:
-  - `templates/chat.html`
-  - `static/js/stream.js`
-  - Reuse `mermaid-zoom.js` / modal-related JS as needed.
-  - Minor CSS additions if strictly necessary.
-- Keep code clean, commented where non-obvious, and consistent with current coding style in the repo.
+Furthermore, the agent must ensure:
+
+1. On **desktop (PyWebView)**:
+   - A random security token is generated once per process.
+   - PyWebView is created with a **User-Agent that embeds this token**.
+   - All sensitive Flask endpoints are protected by a decorator that validates this token.
+
+2. On **normal browser**:
+   - There is no way to obtain or guess the token from configuration.
+   - Sensitive endpoints **reply 403** by default.
+
+3. On **debug runs**:
+   - If `PARLANCHINA_DEBUG=1` is set in the environment:
+     - The token check is bypassed.
+     - Sensitive endpoints are reachable from a normal browser for development/testing.
+
+4. The token must **never be exposed** in UI, logs, or configuration files intended for users.
+
+---
+
+## 2. Configuration module
+
+Create or extend a central config module, e.g. `config.py`:
+
+```python
+# config.py
+import os
+import secrets
+
+# Debug flag: when "1", desktop security is disabled
+DEBUG_MODE: bool = os.getenv("PARLANCHINA_DEBUG") == "1"
+
+# Per-process desktop token, not user-configurable
+_DESKTOP_TOKEN_ENV = os.getenv("PARLANCHINA_DESKTOP_TOKEN")
+DESKTOP_TOKEN: str = _DESKTOP_TOKEN_ENV or secrets.token_urlsafe(16)
+
+# The full UA string that pywebview must use
+DESKTOP_USER_AGENT: str = f"ParlanchinaDesktop/{DESKTOP_TOKEN}"
+````
+
+Notes for the agent:
+
+* `DESKTOP_TOKEN` is generated **once** at process start.
+* The code must always refer to `config.DESKTOP_TOKEN` and `config.DESKTOP_USER_AGENT`, never hard-code strings.
+* `PARLANCHINA_DESKTOP_TOKEN` is optional, mainly for automated tests; do not document it for users.
+
+---
+
+## 3. Desktop launcher (PyWebView)
+
+In the desktop entrypoint (e.g. `main_desktop.py`), the agent must:
+
+1. Ensure the Flask app is running (whatever mechanism is already used).
+2. Create the PyWebView window with the configured `DESKTOP_USER_AGENT`.
+
+Example:
+
+```python
+# main_desktop.py
+import webview
+from config import DESKTOP_USER_AGENT
+
+def main():
+    window = webview.create_window(
+        "Parlanchina",
+        "http://127.0.0.1:5000",
+        user_agent=DESKTOP_USER_AGENT,
+    )
+    webview.start()
+
+if __name__ == "__main__":
+    main()
+```
+
+This means **every request** coming from the embedded desktop UI will carry a User-Agent containing `DESKTOP_TOKEN`.
+
+---
+
+## 4. Flask security guard
+
+The agent must provide a reusable decorator that enforces the desktop-only rule.
+Create `security.py` (or similar):
+
+```python
+# security.py
+from functools import wraps
+from flask import request, abort
+from config import DEBUG_MODE, DESKTOP_TOKEN
+
+def is_desktop_request() -> bool:
+    """
+    Returns True if this request should be treated as coming from
+    the trusted desktop UI.
+    """
+    if DEBUG_MODE:
+        # In debug mode, accept everything (for development)
+        return True
+
+    ua = request.headers.get("User-Agent", "")
+    return DESKTOP_TOKEN in ua
+
+def desktop_only(f):
+    """
+    Decorator for endpoints that must only be reachable
+    from the desktop (PyWebView) or when PARLANCHINA_DEBUG=1.
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not is_desktop_request():
+            abort(403)  # Forbidden for normal browsers
+        return f(*args, **kwargs)
+    return wrapper
+```
+
+### Usage on sensitive endpoints
+
+The agent must **always** apply `@desktop_only` to any endpoint that:
+
+* Exposes local filesystem access (listing directories, reading files, selecting workspace roots).
+* Performs any operation that should not be accessible from a remote browser.
+
+Example:
+
+```python
+# routes/files.py
+from flask import Blueprint, request, jsonify
+from security import desktop_only
+
+bp = Blueprint("files", __name__, url_prefix="/api/files")
+
+@bp.route("/list", methods=["POST"])
+@desktop_only
+def list_files():
+    # Implementation that touches local filesystem
+    ...
+
+@bp.route("/read_text", methods=["POST"])
+@desktop_only
+def read_text():
+    # Implementation that reads local files
+    ...
+```
+
+If new sensitive endpoints are added later, they must also use `@desktop_only`.
+
+---
+
+## 5. Debug mode behaviour
+
+Setting:
+
+```bash
+export PARLANCHINA_DEBUG=1
+```
+
+before starting the app must:
+
+* Make `config.DEBUG_MODE` be `True`.
+* Make `security.is_desktop_request()` always return `True`.
+* Allow sensitive endpoints to be accessible via normal browser (for development, testing, or manual inspection).
+
+The agent must not add any additional user configuration for this.
+The only supported switch is `PARLANCHINA_DEBUG=1`.
+
+---
+
+## 6. Frontend and documentation expectations
+
+From the frontend perspective:
+
+* The desktop UI (PyWebView) works transparently; it sends the special User-Agent automatically.
+* A user opening `http://127.0.0.1:5000` in a normal browser:
+
+  * Can still access **non-sensitive** endpoints (e.g. basic chat).
+  * Will get **403 Forbidden** on any endpoint marked `@desktop_only`.
+
+The agent must **not** generate UI code that assumes browser access to the protected endpoints.
+If such access is needed in tests or experiments, `PARLANCHINA_DEBUG=1` should be used instead.
+
+---
+
+## 7. Invariants to preserve
+
+The code generation agent should treat these as **invariants**:
+
+1. `config.DESKTOP_TOKEN` is the **single source of truth** for the token.
+2. `config.DESKTOP_USER_AGENT` is the **only** UA value used for PyWebView.
+3. All sensitive endpoints are decorated with `@desktop_only`.
+4. No other configuration or runtime flag weakens or bypasses the guard, except:
+
+   * `PARLANCHINA_DEBUG=1` for development.
+
+Any refactor or new code touching security must continue to respect these invariants.
+
 
