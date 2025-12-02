@@ -263,7 +263,7 @@ You can switch modes and select tools in the Toolbox (above the input). Only the
 ## Documentation
 
 - Functional notes: [`doc/functional-doc.md`](doc/functional-doc.md)
-- Technical notes: [`doc/technicl-doc.md`](doc/technicl-doc.md)
+- Technical notes: [`doc/technical-doc.md`](doc/technical-doc.md)
 
 
 ## Principles of Participation

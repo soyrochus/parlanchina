@@ -88,13 +88,51 @@ sequenceDiagram
 - Helper API: `list_sessions`, `load_session`, `create_session`, append user/assistant messages, update title, delete session, getters/setters for mode + tool selections.
 - Data directories created on startup; no DB currently.
 
-## Rendering pipeline
+### Rendering pipeline
+
+1. **Raw response**: Agent/OpenAI returns streamed text.
+2. **Streaming preview**: Client applies basic DOMPurify to preview text; math/Mermaid shows placeholders.
+3. **Final render**: Server applies server-side Markdown conversion (GitHub-flavored) with syntax highlighting, math (KaTeX), and sanitization.
+4. **Mermaid post-processing**: Client-side `mermaid.run()` finds `<pre class="mermaid">` blocks, applies theme, and renders diagrams.
+5. **Intelligent sizing**: JavaScript post-processing applies type-specific sizing constraints:
+   - Detects diagram types via regex patterns (e.g., "entity", "stateDiagram", "flowchart")
+   - Applies sizing rules: ER diagrams (700px+ width, up to 1000px height), state diagrams (600px max height), flowcharts (600-700px width)
+   - Preserves aspect ratios while enforcing minimum readability dimensions
+6. **Image processing**: Generated images are wrapped and sized intelligently:
+   - Container sizing: `fit-content` with responsive max dimensions (800x500px desktop, 400x350px mobile)
+   - Minimum width enforcement: 200px+ for readability
+   - Aspect ratio preservation during constraint application
+7. **Zoom integration**: Both diagrams and images get zoom controls with modal overlays featuring viewport-aware sizing.
+8. **Theme synchronization**: Theme changes trigger Mermaid re-render to maintain visual consistency.
+
+**Implementation details**:
 - Server-side: `utils/markdown.render_markdown` uses MarkdownIt + custom fence handler for Mermaid (wraps with zoom button) and Bleach sanitization (whitelisted tags/attrs).
 - Client-side streaming:
   - `static/js/stream.js` uses markdown-it + DOMPurify for interim renders while streaming; wraps Mermaid blocks and generated images with overlays/zoom controls.
   - Rendering overlay logic masks Mermaid flicker and image generation; state flags stored on `.assistant-message-wrapper`.
   - Final message replaces interim HTML with server-rendered HTML returned from `/finalize`.
 - Theme switching triggers Mermaid reinitialization to match light/dark.
+
+### Frontend implementation
+
+- **JavaScript modules**:
+  - `stream.js`: Core chat streaming, message rendering, intelligent sizing logic
+  - `mermaid-zoom.js`: Modal zoom controls with viewport-aware scaling
+  - `theme.js`: Theme switching and Mermaid re-rendering coordination
+  - `about.js`: About page functionality
+
+- **Intelligent sizing system**:
+  - **Aspect ratio calculation**: `calculateAspectRatio()` determines width/height relationships
+  - **Diagram type detection**: Regex patterns identify ER diagrams, state diagrams, flowcharts
+  - **Constraint application**: Type-specific sizing rules applied via `applyIntelligentMermaidSizing()`
+  - **Image optimization**: `applyIntelligentImageSizing()` handles generated image constraints
+  - **Modal enhancement**: Zoom overlays use viewport dimensions for optimal viewing
+
+- **CSS architecture**:
+  - Tailwind utility classes for responsive design
+  - Custom diagram sizing classes (`.mermaid-er`, `.mermaid-state`, `.mermaid-flowchart`)
+  - Image wrapper constraints with `fit-content` optimization
+  - Modal viewport sizing with percentage-based dimensions
 
 ## LLM integration specifics
 - Uses OpenAI Python SDK:
