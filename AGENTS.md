@@ -1,116 +1,418 @@
-You are a coding agent working on the Parlanchina project (a local Flask-based ChatGPT-like app). Your task is to implement a **new “view source” popup button** for each assistant reply in the chat UI.
 
-There is already:
-- A **copy-to-clipboard button** per reply that copies the plain text of that reply.
-- A **zoom popup mechanism** used for images and Mermaid diagrams (triggered by some zoom control, implemented with HTML + JS in the frontend).
+Your task is to **replace the current naive LLM integration for “Agent Mode”** with a **structured agent engine** based on a clear protocol and types, while **leaving the existing “Ask Mode” intact and functional**.
 
-Your new feature
-Add, for each assistant reply, a **small button next to the copy button** that opens a **modal popup** which:
-- Renders the **full content of that reply** as **markdown**, including:
-  - Headings
-  - Lists
-  - Code blocks with syntax highlighting
-- Is **read-only** (no editing)
-- Is **scrollable** if the content is long
-- Uses the **same popup / overlay mechanism** as the current image / Mermaid zoom (no new modal framework)
-- Shows the content in a **fixed-width, code-friendly style** so code is clearly readable
+You must focus on:
 
-High-level behavior
-1. For every assistant message rendered in `chat.html`, there should be:
-   - The existing copy-to-clipboard button (unchanged).
-   - A new “view source” button to its left or right (small icon; exact icon is up to you, but something like `</>` or a magnifier on paper is fine).
-2. Clicking this new button:
-   - Opens a popup overlay using the **same modal structure and JS logic** as the current zoom popup (do not invent a new modal pattern).
-   - The popup title can be something like “View message source” or “Rendered source”.
-   - The body of the popup shows the **rendered markdown** for that reply, including syntax-highlighted code.
-3. The popup must:
-   - Be read-only
-   - Allow vertical scrolling when content is taller than the viewport
-   - Use existing CSS as much as possible (reuse classes / styles used by the zoom popup and code blocks).
+- Clean separation of concerns.
+- Stable protocols and type definitions.
+- A small but robust state machine for the agent loop.
+- Future portability to Rust (so types and protocols must be explicit and language-agnostic).
 
-Technical guidance
+Do **not** rewrite or break the current Ask Mode behavior or UI. Implement Agent Mode as a separate, well-defined path that can coexist with Ask Mode.
 
-Frontend (HTML / JS)
-- In `templates/chat.html`:
-  - Locate the loop that renders each message in the conversation, including the existing copy-to-clipboard button and any metadata.
-  - For each **assistant reply**, add:
-    - A new button element with:
-      - A distinct CSS class, e.g. `view-source-btn`.
-      - A data attribute that uniquely identifies the message whose content must be shown, e.g. `data-message-id="{{ message.id }}"`, or `data-index="{{ loop.index0 }}"`, depending on what is already available.
-      - A small text/icon label like `</>` or `SRC`.
-  - Ensure the raw content for each message (before HTML escaping) is available to the frontend in some way so the popup can reconstruct the full markdown. You can:
-    - Embed the raw markdown in a hidden `<script type="application/json" ...>` block attached to the message container, or
-    - Use a `data-raw` attribute if safe and not too large, or
-    - Re-use whatever mechanism is already used by the copy-to-clipboard button, if that already has access to the raw message content.
+---
 
-- In `static/js/stream.js`:
-  - Find the existing event delegation / listeners for:
-    - Copy-to-clipboard button
-    - Zoom / Mermaid popup (if present here)
-  - Add a new click handler for the `.view-source-btn`:
-    - Identify the associated message container and retrieve the raw markdown content.
-    - Pass that content to a function that opens the popup in “markdown view” mode.
-  - If the zoom popup is controlled from another JS file (e.g. `mermaid-zoom.js`), expose or reuse a function to open the same modal with arbitrary HTML content, e.g.:
-    - `openModalWithContent(html)` or similar.
-    - If such a function does not exist, refactor the existing zoom logic so that:
-      - The modal opening, closing, and overlay behavior is in one reusable function.
-      - The zoomed image/Mermaid diagram is just one caller of that function.
-      - The new “view source” logic is another caller, providing a different HTML body.
-  - For the markdown rendering, you have two options:
-    1) If the **frontend already uses a JS markdown renderer** (e.g. marked.js) or a syntax highlighter (e.g. highlight.js), reuse that:
-       - Convert raw markdown to HTML on the client.
-       - Insert it into the modal content element.
-       - Run syntax highlighting if needed (e.g. `hljs.highlightAll()`).
-    2) If markdown is rendered **server-side** already (e.g. `utils/markdown.py`), and the HTML is available in the message container:
-       - You may inject the already-rendered HTML into the modal.
-       - Ensure it is not double-escaped.
-  - Make the modal content container scrollable via CSS:
-    - Set a max-height (e.g. `70vh`) and `overflow-y: auto` on the body area of the modal.
+## 1. Context and high-level goal
 
-Existing modal reuse
-- Look at how the image / Mermaid zoom popup works:
-  - Identify:
-    - The modal HTML structure in the templates (probably in `base.html` or `chat.html`).
-    - The JS that:
-      - Opens the modal,
-      - Injects content (zoomed image/Mermaid),
-      - Closes the modal on overlay click/close button.
-  - Do not change its behavior for images/Mermaid.
-  - Extend that mechanism with a **new “mode”** or simply a new callsite that:
-    - Uses the same modal, but injects a scrollable `<div>` with rendered markdown/code instead of an image.
-- Keep a single modal in the DOM; do not create multiple overlays.
+Parlanchina currently has:
 
-Styling
-- Use existing CSS classes if present for:
-  - Code blocks, e.g. `.code-block`, `pre code`, etc.
-  - Modal content and header.
-- If necessary, add minimal new CSS to:
-  - Make the modal body scrollable.
-  - Slightly adjust font to a monospace for code sections, while leaving markdown text as normal.
-- Do not introduce heavy new styling frameworks.
+- An **Ask Mode**: a simple “send prompt → get reply” interaction with an LLM. This **must stay intact**.
+- An **Agent Mode**: currently implemented with naive LLM calls without proper structure.
 
-Backend
-- Do not change backend logic unless necessary to expose the **raw message text** to the frontend.
-- If the frontend currently only sees HTML (after markdown rendering), and the copy-to-clipboard logic already has access to the raw text, reuse that same source.
-- If needed, extend the message serialization in `routes.py` to include `raw_text` and pass that through to the template.
+You must design and implement a **generic agent engine** for Agent Mode with:
 
-Acceptance criteria
-1. For each assistant reply in the chat:
-   - A new “view source” button appears next to the copy-to-clipboard button.
-2. Clicking the “view source” button:
-   - Opens the existing modal overlay.
-   - Shows the **full message content** rendered as markdown, including syntax-highlighted code blocks.
-   - The content is read-only and scrollable.
-3. Closing the modal returns to the normal chat view without affecting the rest of the UI.
-4. On both Mac and Linux (desktop browser), the behavior is consistent.
-5. Existing image / Mermaid zoom still works exactly as before.
+- A deterministic orchestrator loop.
+- A strict JSON protocol for LLM input/output.
+- A pluggable tool system (MCP tools, local tools, filesystem tools).
+- A small, explicit mode/state machine: `PLAN`, `ACT`, `REVIEW`, `DONE`.
+- A minimal memory abstraction that can later map to a vector DB or MCP-based memory.
 
-Implementation requirements
-- Do not rename or move existing files or directories.
-- Keep the implementation localized to:
-  - `templates/chat.html`
-  - `static/js/stream.js`
-  - Reuse `mermaid-zoom.js` / modal-related JS as needed.
-  - Minor CSS additions if strictly necessary.
-- Keep code clean, commented where non-obvious, and consistent with current coding style in the repo.
+The implementation should be in **Python** (to match the existing Parlanchina codebase), but all core protocols and types must be designed in a way that makes later porting to **Rust** straightforward.
 
+---
+
+## 2. Architecture overview
+
+Implement the following conceptual components:
+
+- `AgentEngine` — main orchestration loop for Agent Mode.
+- `AgentProfile` — configuration object for an agent profile (prompts, tools, limits).
+- `AgentState` — serializable state that survives between loop iterations.
+- `LLMBackend` — abstraction over the LLM provider (OpenAI, local, etc.).
+- `ToolRegistry` — registry and invoker of tools, including MCP tools.
+- `Tool` — typed interface for individual tools (filesystem, MCP, HTTP, etc.).
+- `MemoryLayer` — facade over working memory, semantic memory (RAG), and episodic memory.
+
+These components should be separated into clearly named modules / files so that a future Rust implementation can mirror the same structure and protocols.
+
+### 2.1 Mermaid component diagram
+
+Include this Mermaid diagram (strict syntax) in the relevant documentation / comments to document the design:
+
+```mermaid
+graph TD
+  User[User] -->|Task request| AgentEngine
+
+  subgraph AgentEngine
+    AE[AgentEngine<br/>main loop]
+    PROF[AgentProfile]
+    STATE[AgentState]
+    REG[ToolRegistry]
+    MEM[MemoryLayer]
+    LLM[LLMBackend]
+  end
+
+  AE --> PROF
+  AE --> STATE
+  AE --> REG
+  AE --> MEM
+  AE --> LLM
+
+  REG -->|invoke| Tool1[Tool: fs]
+  REG -->|invoke| Tool2[Tool: mcp-kb]
+  REG -->|invoke| Tool3[Tool: http]
+
+  MEM -->|uses| Tool2
+  MEM -->|uses| Tool3
+
+  LLM -->|LLM Protocol| AE
+
+  AE -->|Final answer| User
+````
+
+---
+
+## 3. Core data types and protocols
+
+Define these types as Python dataclasses or pydantic models, but design them as if they were language-agnostic message formats. They must be easily serializable to/from JSON. Avoid framework-specific magic.
+
+### 3.1 `AgentProfile`
+
+Configuration per agent profile (for example, “code navigator”, “repo assistant”, etc.).
+
+Fields:
+
+* `id: str`
+* `name: str`
+* `system_prompt: str`
+* `tool_ids: list[str]`
+* `limits`:
+
+  * `max_steps: int`
+  * `max_tokens_per_call: int`
+  * `allow_destructive_tools: bool`
+* `memory_packs: list[str]`
+  (IDs or tags for preloaded “associative” context)
+
+### 3.2 `AgentState`
+
+Task-local state that persists across loop iterations. It must be serializable and easy to inspect.
+
+Fields:
+
+* `goal: str`
+* `subgoals: list[str]`
+* `mode: Literal["PLAN", "ACT", "REVIEW", "DONE"]`
+* `step: int`
+* `history: list[HistoryEntry]`
+* `scratchpad: str`
+  Short free-text summary of what matters so far.
+* `metadata: dict[str, str]`
+  Free-form flags/config for profile-specific behavior.
+
+`HistoryEntry`:
+
+* `action: LLMAction` (you can model this as a dict or a dedicated type)
+* `observation: list[ToolObservation]`
+
+You must implement JSON (de)serialization for these types to allow persistence and logging.
+
+### 3.3 `ContextChunk`
+
+Represents a piece of retrieved context (RAG, memory, etc.):
+
+* `id: str`
+* `source: Literal["kb", "code", "episodic"]`
+* `content: str`
+* `score: float`
+
+---
+
+## 4. LLM input/output protocol
+
+This protocol is critical. The engine must always communicate with the LLM backend using a **strict JSON schema** that you enforce in Python.
+
+### 4.1 LLM input envelope
+
+Structure:
+
+* `profile: AgentProfile` (or at least `profile_id` and resolved fields)
+* `state: AgentState`
+* `user_input: Optional[str]`
+  Only present on the first step or when the user injects new input mid-run.
+* `context_chunks: list[ContextChunk]`
+  Pre-retrieved “associative” memory for this step.
+
+You must implement a function (or method) that creates this envelope, serializes it to JSON, and passes it to the LLM backend as part of the prompt (system + assistant + tool meta as appropriate).
+
+### 4.2 LLM output envelope
+
+The LLM must always return JSON of the following structure:
+
+* `mode: Literal["PLAN", "ACT", "REVIEW", "DONE"]`
+* `message_to_user: Optional[str]`
+* `tool_calls: list[ToolCall]`
+* `update_subgoals: Optional[list[str]]`
+* `update_scratchpad: Optional[str]`
+* `done: bool`
+
+`ToolCall`:
+
+* `id: str`
+  Unique per step. Used to correlate with results.
+* `tool: str`
+  Tool identifier as known by `ToolRegistry`.
+* `args: dict[str, Any]`
+  Arguments to be passed to the tool.
+
+You must:
+
+* Validate that the LLM output is well-formed JSON.
+* Validate that `mode`, `done`, and `tool_calls` obey the expected schema.
+* Reject or handle invalid outputs gracefully (e.g., fallback to a safe response or ask the LLM to correct itself).
+
+---
+
+## 5. Tool protocol and registry
+
+Define a generic tool interface that works both for local tools and MCP-based tools.
+
+### 5.1 `ToolDescriptor`
+
+* `id: str`
+* `name: str`
+* `description: str`
+* `input_schema: dict` (JSON Schema compatible)
+* `output_schema: dict`
+* `side_effect_level: Literal["none", "read", "write"]`
+
+### 5.2 `ToolInvocation` and `ToolResult`
+
+`ToolInvocation`:
+
+* `id: str`
+  Matches `ToolCall.id`.
+* `tool_id: str`
+* `args: dict[str, Any]`
+
+`ToolResult`:
+
+* `id: str`
+* `tool_id: str`
+* `success: bool`
+* `output: Any`
+* `error_message: Optional[str]`
+
+### 5.3 `ToolRegistry`
+
+Implement `ToolRegistry` with:
+
+* `register_tool(descriptor: ToolDescriptor, impl: Callable)`
+  (or a Tool class with an `invoke` method)
+* `get_descriptor(tool_id: str) -> ToolDescriptor`
+* `execute(invocations: list[ToolInvocation]) -> list[ToolResult]`
+
+The registry should:
+
+* Enforce safety policies (for example, disallow “write” tools if `allow_destructive_tools` is false for the current profile).
+* Handle MCP-based tools via appropriate adapters (wrapping MCP calls into the `ToolInvocation`/`ToolResult` protocol).
+
+---
+
+## 6. Memory subsystem
+
+Implement a `MemoryLayer` that provides a simplified interface over:
+
+* Working memory (already in `AgentState` and history).
+* Semantic memory (RAG over docs/code).
+* Episodic memory (past tasks).
+
+You are not required to fully implement a vector DB integration now. Build the interface so that a future implementation can plug in a real vector store or MCP-based memory.
+
+### 6.1 `MemoryLayer` interface
+
+Methods:
+
+* `initial_associative_context(goal: str) -> list[ContextChunk]`
+  Create an initial set of context chunks from configured “memory packs” and/or simple keyword search.
+* `query_semantic(query: str) -> list[ContextChunk]`
+  Placeholder for RAG — can be a stub initially.
+* `query_episodic(query: str) -> list[ContextChunk]`
+  Placeholder for episode-based recall.
+* `store_episode(summary: str, tags: list[str]) -> None`
+  Store a summary of what happened in this task.
+
+### 6.2 Memory diagram
+
+Include this Mermaid diagram in the documentation:
+
+```mermaid
+graph TD
+  subgraph AgentEngine
+    AE[AgentEngine]
+    STATE[AgentState<br/>Working memory]
+  end
+
+  subgraph MemoryLayer
+    MEM[MemoryLayer]
+    SEM[SemanticMemory<br/>RAG index]
+    EPI[EpisodicMemory<br/>task log]
+  end
+
+  AE --> STATE
+  AE --> MEM
+
+  MEM --> SEM
+  MEM --> EPI
+
+  subgraph ExternalStores
+    KB[(KB / Vector DB)]
+    LOG[(Episodes store)]
+  end
+
+  SEM --> KB
+  EPI --> LOG
+```
+
+---
+
+## 7. Agent loop and state machine
+
+Implement the Agent Mode main loop as a deterministic orchestrator using the types and protocols above.
+
+### 7.1 Sequence diagram
+
+Use this logic and encode it in code:
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant AE as AgentEngine
+  participant MEM as MemoryLayer
+  participant LLM as LLMBackend
+  participant REG as ToolRegistry
+  participant T as Tool(s)
+
+  U->>AE: Task request
+  AE->>MEM: initial_associative_context(goal)
+  MEM-->>AE: ContextChunk[]
+
+  loop Per step (bounded by max_steps)
+    AE->>LLM: LLMInput(profile, state, context_chunks, user_input?)
+    LLM-->>AE: LLMOutput(mode, tool_calls, updates, done)
+
+    AE->>AE: validate LLMOutput<br/>update state (mode, subgoals, scratchpad)
+
+    alt LLMOutput.tool_calls not empty
+      AE->>REG: execute(tool_calls)
+      REG->>T: invoke(args)
+      T-->>REG: ToolResult
+      REG-->>AE: ToolResult[]
+      AE->>AE: append to history as observations
+    end
+
+    alt LLMOutput.message_to_user
+      AE-->>U: partial message
+    end
+
+    alt LLMOutput.done or mode == "DONE" or step limit
+      AE-->>U: final answer
+      break
+    end
+  end
+```
+
+### 7.2 State machine
+
+Implement the agent mode state machine as a small enum and deterministic transitions enforced by the engine, not by the LLM alone:
+
+```mermaid
+stateDiagram-v2
+  [*] --> PLAN
+
+  PLAN --> ACT: plan created
+  PLAN --> REVIEW: small tasks resolved directly
+  PLAN --> DONE: trivial goal satisfied
+
+  ACT --> REVIEW: actions completed
+  ACT --> PLAN: replanning needed
+
+  REVIEW --> ACT: more work required
+  REVIEW --> DONE: goal achieved
+
+  DONE --> [*]
+```
+
+The LLM can propose a `mode` value, but the engine must:
+
+* Validate the transition.
+* Reject illegal transitions.
+* Fall back to safe transitions if necessary (for example, force `REVIEW` then `DONE` when limits are reached).
+
+---
+
+## 8. Integration with existing Parlanchina modes
+
+You must ensure that:
+
+1. **Ask Mode remains unchanged**:
+
+   * Do not modify the behavior, prompts, or flow for Ask Mode.
+   * If necessary, factor shared logic into reusable components, but preserve the Ask Mode contract.
+
+2. **Agent Mode uses the new engine**:
+
+   * Replace the naive “just call LLM in a loop” implementation with the `AgentEngine`.
+   * Ensure the UI/UX for Agent Mode works as before from the user’s perspective, but now powered by the agent engine.
+   * If Agent Mode has specific prompts or behavior, implement them as one or more `AgentProfile`s.
+
+3. **Configuration points**:
+
+   * Add configuration to select which profiles are available in Agent Mode.
+   * Allow simple extension: new profiles should be addable via config, not rewriting core engine code.
+
+---
+
+## 9. Non-functional requirements
+
+* The implementation must be **readable**, **testable**, and **modular**.
+* The protocols (LLM envelopes, Tool protocol, MemoryLayer interface) must be **documented**, preferably in a dedicated module or README with the Mermaid diagrams above.
+* Where possible, avoid hard-binding to specific LLM providers. `LLMBackend` should be pluggable.
+* Avoid over-engineering. Prioritize a minimal but solid implementation of:
+
+  * Types and protocols.
+  * Engine loop.
+  * Wiring into Parlanchina’s existing architecture.
+
+---
+
+## 10. Deliverables
+
+As the code generation agent, you must:
+
+1. Create the core modules/classes for:
+
+   * `AgentProfile`
+   * `AgentState` (+ `HistoryEntry`, `ContextChunk`)
+   * `LLMInput`/`LLMOutput` envelopes (even if implicit via helper functions)
+   * `ToolDescriptor`, `ToolInvocation`, `ToolResult`, `ToolRegistry`
+   * `MemoryLayer` interface (with simple stub implementations)
+   * `AgentEngine` orchestrator with main loop and state machine
+
+2. Integrate `AgentEngine` into Parlanchina’s Agent Mode entry points.
+
+3. Preserve Ask Mode behavior and configuration.
+
+4. Add inline documentation and comments summarizing the protocols and pointing to the diagrams and design.
+
+Generate the necessary code, tests, and wiring to make the new Agent Mode functional and maintainable with this architecture.
