@@ -1,48 +1,19 @@
-import json
 import logging
-import os
-import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from openai import AsyncAzureOpenAI, AsyncOpenAI, OpenAIError
+from openai import OpenAIError
 
-from parlanchina.services import image_store, internal_tools, mcp_manager
+from parlanchina.services.agent_backend import OpenAILLMBackend
+from parlanchina.services.agent_engine import AgentEngine, AgentTurn
+from parlanchina.services.agent_memory import InMemoryMemoryLayer
+from parlanchina.services.agent_protocol import AgentLimits, AgentProfile, AgentState, HistoryEntry
+from parlanchina.services.agent_tools import ToolRegistry, build_registry
+from parlanchina.services.openai_client import get_async_client
 
 logger = logging.getLogger(__name__)
-
-_client = None
-_client_signature: tuple[str, str | None, str | None, str | None] | None = None
-
-
-def _get_client():
-    global _client, _client_signature
-
-    signature = _current_client_signature()
-    if _client and _client_signature == signature:
-        return _client
-
-    provider, api_key, api_base, api_version = signature
-    if provider == "azure":
-        _client = AsyncAzureOpenAI(
-            api_key=api_key,
-            api_version=api_version,
-            azure_endpoint=api_base,
-        )
-    else:
-        _client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-    _client_signature = signature
-    return _client
-
-
-def _current_client_signature() -> tuple[str, str | None, str | None, str | None]:
-    provider = (os.getenv("OPENAI_PROVIDER") or "openai").lower()
-    api_key = os.getenv("OPENAI_API_KEY")
-    api_base = os.getenv("OPENAI_API_BASE")
-    api_version = os.getenv("OPENAI_API_VERSION")
-    return provider, api_key, api_base, api_version
 
 
 def _format_input(messages: List[dict]) -> List[dict]:
@@ -133,11 +104,11 @@ async def stream_response(
             yield event
         return
 
-    async for event in _stream_agent_mode(
+    async for event in _stream_agent_engine(
         messages,
         model,
-        enabled_internal=set(internal_tools),
-        enabled_mcp=set(mcp_tools),
+        enabled_internal=list(internal_tools),
+        enabled_mcp=list(mcp_tools),
     ):
         yield event
 
@@ -149,7 +120,7 @@ async def _stream_ask_mode(
 ) -> AsyncIterator[LLMEvent]:
     """Single-shot ask mode using only internal tools (image generation)."""
 
-    client = _get_client()
+    client = get_async_client()
     started = time.time()
     total_chars = 0
     formatted_messages = _format_input(messages)
@@ -250,492 +221,106 @@ async def _stream_ask_mode(
         )
 
 
-async def _stream_agent_mode(
+async def _stream_agent_engine(
     messages: List[dict],
     model: str,
-    enabled_internal: set[str],
-    enabled_mcp: set[str],
+    enabled_internal: List[str],
+    enabled_mcp: List[str],
 ) -> AsyncIterator[LLMEvent]:
-    """Handle iterative agent loop using both internal and MCP tools."""
+    """Run the structured AgentEngine loop and emit UI-friendly events."""
 
-    client = _get_client()
-    tool_payloads, tool_name_map = await _build_agent_tool_payloads(
-        enabled_internal_ids=enabled_internal, enabled_mcp_ids=enabled_mcp
+    registry = build_registry(enabled_internal, enabled_mcp)
+    profile = _build_agent_profile(registry)
+    state = AgentState(
+        goal=_latest_user_goal(messages),
+        subgoals=[],
+        mode="PLAN",
+        step=0,
+        history=_history_from_messages(messages),
+        scratchpad="",
     )
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug("Agent loop start: internal=%s mcp=%s", sorted(enabled_internal), sorted(enabled_mcp))
-        logger.debug("Agent tool payloads: %s", [p.get("function", {}).get("name") for p in tool_payloads])
-    allowed_names = set(tool_name_map.keys())
-    tool_results: list[str] = []
-    last_structured: list[dict[str, Any]] = []
-    conversation = _format_input(messages)
+    backend = OpenAILLMBackend(model=model)
+    memory = InMemoryMemoryLayer()
+    engine = AgentEngine(profile, registry, memory, backend)
 
-    # Plan step: ask the model for a brief plan before executing tools.
-    try:
-        available_tool_names = ", ".join(sorted(p.get("function", {}).get("name", "") for p in tool_payloads))
-        plan_prompt = [
-            {
-                "role": "system",
-                "content": (
-                    "Given the user request, produce a brief, numbered plan of tool actions to complete it. "
-                    "Keep it concise (1-3 steps). Available tools this turn: "
-                    f"{available_tool_names or 'none'}. "
-                    "Use only these tools for data/actions; do not invent other tools or browsing. "
-                    "If no tools are needed, state that. Do not execute tools here."
-                ),
-            },
-            {
-                "role": "user",
-                "content": messages[-1].get("content", "") if messages else "",
-            },
-        ]
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("Plan prompt tools=%s user=%s", available_tool_names, plan_prompt[-1]["content"])
-        plan_resp = await complete_response(plan_prompt, model)
-        if plan_resp:
-            conversation.insert(
-                0,
-                {
-                    "role": "assistant",
-                    "content": f"Plan:\n{plan_resp}",
-                },
-            )
-            logger.debug("Plan response: %s", plan_resp)
-    except Exception:
-        # Planning is best-effort; continue if it fails.
-        logger.debug("Plan step failed; continuing without plan", exc_info=True)
-        pass
-    if not tool_payloads:
-        # No valid tools resolved; fall back to plain completion.
-        logger.debug("No tool payloads; falling back to plain completion")
-        final_text = await complete_response(messages, model)
-        for chunk in _yield_text_chunks(final_text):
-            yield LLMEvent(type="text_delta", text=chunk)
-        yield LLMEvent(type="text_done", text=final_text)
-        return
-
-    if tool_payloads:
-        tool_list = ", ".join(sorted(tool_name_map.keys()))
-        conversation = [
-            {
-                "role": "system",
-                "content": (
-                    "You can call the available tools to fetch or modify data when it helps answer the user. "
-                    f"Tools enabled for this turn: {tool_list}. "
-                    "Call a tool when you need data or actions; otherwise answer directly. "
-                    "When you return tool results, clearly surface the important fields in plain text (e.g., `Title: ...`, `Summary: ...`) before continuing. "
-                    "If you both fetch data and generate media (like images), present the fetched fields first, then the media prompt/output. "
-                    "Do not state that you lack web access; rely on the provided tools for data retrieval."
-                ),
-            }
-        ] + conversation
-    max_turns = 6
-    for _ in range(max_turns):
-        try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=conversation,
-                tools=tool_payloads,
-                tool_choice="auto",
-            )
-        except OpenAIError as exc:
-            logger.exception("Chat completion error: %s", exc)
-            yield LLMEvent(type="error", text="Tool-enabled model call failed.")
-            return
-        except Exception as exc:  # pragma: no cover - catch-all safety
-            logger.exception("Unexpected tool-call error: %s", exc)
-            yield LLMEvent(type="error", text="Unexpected error during tool call.")
-            return
-
-        choice = (response.choices or [None])[0]
-        message = getattr(choice, "message", None)
-        if not message:
-            break
-
-        tool_calls = getattr(message, "tool_calls", None) or []
-        if tool_calls:
-            assistant_message = {
-                "role": "assistant",
-                "content": message.content or "",
-                "tool_calls": [_tool_call_to_dict(tc) for tc in tool_calls],
-            }
-            conversation.append(assistant_message)
-            for tc in tool_calls:
-                call = _tool_call_to_dict(tc)
-                tool_name = call.get("function", {}).get("name") or ""
-                args = _parse_tool_args(call.get("function", {}).get("arguments"))
-                logger.debug("Tool call requested: %s args=%s", tool_name, args)
-                # Accept both safe names and full ids from the model
-                resolved_tool_id = tool_name_map.get(tool_name) or (
-                    tool_name if tool_name in tool_name_map.values() else None
-                )
-                allowed = tool_name in allowed_names or tool_name in tool_name_map.values()
-                if not resolved_tool_id or not allowed:
-                    # Model asked for a tool that is not enabled this turn.
-                    result_text = f"Tool {tool_name} is disabled for this turn."
-                elif resolved_tool_id.startswith("internal."):
-                    if resolved_tool_id not in enabled_internal:
-                        result_text = f"Tool {tool_name} is disabled for this turn."
-                    else:
-                        result_text = await _run_internal_tool(resolved_tool_id, args)
-                        # Emit image events for internal image tools
-                        if resolved_tool_id == "internal.image":
-                            image_results = _get_and_clear_agent_image_results()
-                            for img in image_results:
-                                yield LLMEvent(
-                                    type="image_call",
-                                    image_b64=None,  # Already saved to file
-                                    image_params={"prompt": img["prompt"], "size": img["size"], "url_path": img["url_path"]},
-                                )
-                else:
-                    if resolved_tool_id not in enabled_mcp:
-                        result_text = f"Tool {tool_name} is disabled for this turn."
-                    else:
-                        result_text = await _run_mcp_tool(resolved_tool_id, args)
-                logger.debug("Tool call result for %s: %s", tool_name, result_text[:500])
-                tool_results.append(result_text)
-                parsed_structured = _unwrap_tool_result(result_text)
-                if parsed_structured:
-                    last_structured.extend(parsed_structured)
-                conversation.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.get("id") or "",
-                        "content": result_text,
-                        "name": tool_name or None,
-                    }
-                )
-            continue
-
-        final_text = message.content or ""
-        if final_text:
-            for chunk in _yield_text_chunks(final_text):
+    last_user = _latest_user_goal(messages)
+    emitted_message = False
+    async for turn in engine.run(state, last_user):
+        for event in _emit_artifacts(turn):
+            yield event
+        if turn.message:
+            emitted_message = True
+            for chunk in _yield_text_chunks(turn.message):
                 yield LLMEvent(type="text_delta", text=chunk)
-            yield LLMEvent(type="text_done", text=final_text)
+            yield LLMEvent(type="text_done", text=turn.message)
+        if turn.done:
             return
 
-    # If we reach here, we didn't get a final answer. Ask the model to summarize tool results.
-    if tool_results:
-        # Prefer structured extracts; otherwise, prefer non-error results; fall back to all results.
-        summary_sources: list[str] = []
-        if last_structured:
-            try:
-                summary_sources.append(json.dumps(last_structured, indent=2))
-            except Exception:
-                pass
-        if not summary_sources:
-            non_error = [r for r in tool_results if "failed to run" not in r.lower() and "error" not in r.lower()]
-            if non_error:
-                summary_sources = non_error
-        if not summary_sources:
-            summary_sources = tool_results
+    if not emitted_message:
+        yield LLMEvent(
+            type="text_done",
+            text="Agent loop completed without a final response.",
+        )
 
-        # Pull the last user request to provide context.
-        last_user = next((m.get("content") for m in reversed(messages) if m.get("role") == "user"), "")
-        logger.debug("Summarization fallback: last_user=%s sources_count=%s", last_user, len(summary_sources))
 
-        # Try one final turn with tools to allow finishing (including media generation).
-        final_conversation = [
-            {
-                "role": "system",
-                "content": (
-                    "Provide a final answer to the user's request using the tool results below. "
-                    "Clearly list key fields (e.g., Title, Description) and, if applicable, generate requested media via the available tools. "
-                    "Ignore failed or irrelevant tool attempts."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"User request: {last_user}\n\nTool results:\n" + "\n\n".join(summary_sources),
-            },
-        ]
-
-        for _ in range(2):
-            try:
-                resp = await client.chat.completions.create(
-                    model=model,
-                    messages=final_conversation,
-                    tools=tool_payloads,
-                    tool_choice="auto",
+def _emit_artifacts(turn: AgentTurn) -> List[LLMEvent]:
+    events: list[LLMEvent] = []
+    for artifact in turn.artifacts:
+        if artifact.get("type") == "image":
+            params = {
+                "prompt": artifact.get("prompt"),
+                "size": artifact.get("size"),
+                "url_path": artifact.get("url_path"),
+                "url": artifact.get("url"),
+            }
+            events.append(
+                LLMEvent(
+                    type="image_call",
+                    image_b64=None,
+                    image_params={k: v for k, v in params.items() if v},
                 )
-            except Exception:
-                break
+            )
+    return events
 
-            choice = (resp.choices or [None])[0]
-            msg = getattr(choice, "message", None)
-            if not msg:
-                continue
-            tool_calls = getattr(msg, "tool_calls", None) or []
-            if tool_calls:
-                assistant_msg = {
-                    "role": "assistant",
-                    "content": msg.content or "",
-                    "tool_calls": [_tool_call_to_dict(tc) for tc in tool_calls],
-                }
-                final_conversation.append(assistant_msg)
-                for tc in tool_calls:
-                    call = _tool_call_to_dict(tc)
-                    tool_name = call.get("function", {}).get("name") or ""
-                    args = _parse_tool_args(call.get("function", {}).get("arguments"))
-                    resolved_tool_id = tool_name_map.get(tool_name) or (
-                        tool_name if tool_name in tool_name_map.values() else None
-                    )
-                    allowed = tool_name in allowed_names or tool_name in tool_name_map.values()
-                    if not resolved_tool_id or not allowed:
-                        result_text = f"Tool {tool_name} is disabled for this turn."
-                    elif resolved_tool_id.startswith("internal."):
-                        if resolved_tool_id not in enabled_internal:
-                            result_text = f"Tool {tool_name} is disabled for this turn."
-                        else:
-                            result_text = await _run_internal_tool(resolved_tool_id, args)
-                            # Emit image events for internal image tools in summary phase too
-                            if resolved_tool_id == "internal.image":
-                                image_results = _get_and_clear_agent_image_results()
-                                for img in image_results:
-                                    yield LLMEvent(
-                                        type="image_call",
-                                        image_b64=None,  # Already saved to file
-                                        image_params={"prompt": img["prompt"], "size": img["size"], "url_path": img["url_path"]},
-                                    )
-                    else:
-                        if resolved_tool_id not in enabled_mcp:
-                            result_text = f"Tool {tool_name} is disabled for this turn."
-                        else:
-                            result_text = await _run_mcp_tool(resolved_tool_id, args)
-                    tool_results.append(result_text)
-                    final_conversation.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call.get("id") or "",
-                            "content": result_text,
-                            "name": tool_name or None,
-                        }
-                    )
-                continue
 
-            final_text = msg.content or ""
-            if final_text:
-                for chunk in _yield_text_chunks(final_text):
-                    yield LLMEvent(type="text_delta", text=chunk)
-                yield LLMEvent(type="text_done", text=final_text)
-                return
+def _latest_user_goal(messages: List[dict]) -> str:
+    for message in reversed(messages or []):
+        if message.get("role") == "user" and message.get("content"):
+            return str(message.get("content"))
+    return "Resolve the user request"
 
-        # If still nothing, fall back to a concise summary without tools.
-        summary_prompt = [
-            {
-                "role": "system",
-                "content": (
-                    "Provide a final answer to the user's request using the tool results below. "
-                    "Clearly list key fields (e.g., Title, Description) and, if applicable, the requested media prompt/output. "
-                    "Ignore earlier failed or irrelevant tool attempts."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"User request: {last_user}\n\nTool results:\n" + "\n\n".join(summary_sources),
-            },
-        ]
-        summary_text = await complete_response(summary_prompt, model)
-        yield LLMEvent(type="text_done", text=summary_text)
-        return
 
-    yield LLMEvent(
-        type="text_done",
-        text="Tool call loop ended without a final response. Please try again or adjust your request.",
+def _history_from_messages(messages: List[dict]) -> List[HistoryEntry]:
+    history: list[HistoryEntry] = []
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content") or message.get("raw_markdown") or ""
+        if role in {"user", "assistant"}:
+            history.append(HistoryEntry(role=role, content=content))
+    return history
+
+
+def _build_agent_profile(registry: ToolRegistry) -> AgentProfile:
+    limits = AgentLimits(max_steps=6, max_tokens_per_call=4000, allow_destructive_tools=False)
+    system_prompt = (
+        "You are Parlanchina AgentEngine. Coordinate tools using the PLAN/ACT/REVIEW/DONE"
+        " state machine. Keep responses short, factual, and stream-friendly."
     )
-
-
-async def _build_agent_tool_payloads(
-    enabled_internal_ids: set[str],
-    enabled_mcp_ids: set[str],
-) -> tuple[List[dict], dict[str, str]]:
-    """Return tool payloads and a map of safe names -> full ids."""
-    payloads: List[dict] = []
-    name_map: dict[str, str] = {}
-    used_names: set[str] = set()
-
-    # Internal tools
-    for tool_id in enabled_internal_ids:
-        definition = internal_tools.get_internal_tool_definition(tool_id)
-        if not definition:
-            continue
-        safe_name = _safe_tool_name(definition["id"], used_names)
-        used_names.add(safe_name)
-        name_map[safe_name] = definition["id"]
-        payloads.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": safe_name,
-                    "description": definition.get("description") or "",
-                    "parameters": definition.get("parameters") or {"type": "object", "properties": {}},
-                },
-            }
-        )
-
-    # MCP tools
-    for tool_id in enabled_mcp_ids:
-        definition = await mcp_manager.get_tool_definition_async(tool_id)
-        if not definition:
-            continue
-        safe_name = _safe_tool_name(definition["full_name"], used_names)
-        used_names.add(safe_name)
-        name_map[safe_name] = definition["full_name"]
-        payloads.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": safe_name,
-                    "description": definition.get("description") or "",
-                    "parameters": definition.get("parameters") or {"type": "object", "properties": {}},
-                },
-            }
-        )
-    return payloads, name_map
-
-
-def _tool_call_to_dict(tool_call: Any) -> dict:
-    try:
-        return tool_call.model_dump()
-    except Exception:
-        pass
-    try:
-        return tool_call.to_dict()
-    except Exception:
-        pass
-    function = getattr(tool_call, "function", None)
-    return {
-        "id": getattr(tool_call, "id", ""),
-        "type": getattr(tool_call, "type", "function"),
-        "function": {
-            "name": getattr(function, "name", None) if function else None,
-            "arguments": getattr(function, "arguments", None) if function else None,
-        },
-    }
-
-
-async def _run_mcp_tool(tool_name: str, args: dict | None) -> str:
-    if "." not in tool_name:
-        return f"Tool name {tool_name} is not in server.tool format."
-    server, name = tool_name.split(".", 1)
-    try:
-        result = await mcp_manager.call_tool_async(server, name, args or {})
-        return result.display_text
-    except Exception as exc:  # pragma: no cover - safety for MCP failures
-        logger.exception("MCP tool %s/%s failed", server, name)
-        return f"Failed to run {tool_name}: {exc}"
-
-
-async def _run_internal_tool(tool_id: str, args: dict | None) -> str:
-    if tool_id == "internal.image":
-        return await _run_internal_image_tool(args or {})
-    return f"Unknown internal tool: {tool_id}"
-
-
-async def _run_internal_image_tool(args: dict) -> str:
-    prompt = (args.get("prompt") or "").strip()
-    if not prompt:
-        return "Image generation failed: prompt is required."
-    size = args.get("size") or "1024x1024"
-    client = _get_client()
-    try:
-        response = await client.images.generate(
-            model="gpt-image-1",
-            prompt=prompt,
-            size=size,
-        )
-        data = response.data[0] if getattr(response, "data", None) else None
-        b64_content = getattr(data, "b64_json", None) if data else None
-        url = getattr(data, "url", None) if data else None
-        if b64_content:
-            meta = image_store.save_image_from_base64(b64_content)
-            # Store image info for later event emission
-            _store_agent_image_result(meta.url_path, prompt, size)
-            # Return just text description, not markdown (event will handle the image)
-            return f"Image generated successfully with prompt: {prompt}"
-        if url:
-            return f"Generated image:\n\n![{prompt}]({url})"
-        return "Image generation failed: empty response."
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.exception("Internal image tool failed")
-        return f"Image generation failed: {exc}"
-
-
-# Global storage for agent mode image results
-_agent_image_results: list[dict] = []
-
-def _store_agent_image_result(url_path: str, prompt: str, size: str):
-    """Store image result for agent mode to emit as image_call event."""
-    _agent_image_results.append({
-        "url_path": url_path,
-        "prompt": prompt,
-        "size": size
-    })
-
-def _get_and_clear_agent_image_results() -> list[dict]:
-    """Get and clear stored image results."""
-    global _agent_image_results
-    results = _agent_image_results.copy()
-    _agent_image_results.clear()
-    return results
-
-
-def _parse_tool_args(raw_args: Any) -> dict:
-    if isinstance(raw_args, dict):
-        return raw_args
-    if isinstance(raw_args, str):
-        try:
-            parsed = json.loads(raw_args)
-            return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-
-def _unwrap_tool_result(raw: str) -> list[dict[str, Any]]:
-    """Best-effort to extract structured rows from a tool result string."""
-    if not raw or "text='" not in raw:
-        return []
-    # Extract the first text='...' segment
-    try:
-        start = raw.index("text='") + len("text='")
-        end = raw.find("'", start)
-        if end == -1:
-            return []
-        candidate = raw[start:end]
-        # Unescape common sequences
-        candidate = candidate.replace("\\n", "\n").replace("\\\"", '"').replace("\\'", "'")
-        # If it looks like a JSON array or object, try to parse
-        candidate_stripped = candidate.strip()
-        if candidate_stripped.startswith("[") or candidate_stripped.startswith("{"):
-            try:
-                parsed = json.loads(candidate_stripped)
-                if isinstance(parsed, list):
-                    return parsed
-                if isinstance(parsed, dict):
-                    return [parsed]
-            except Exception:
-                return []
-    except Exception:
-        return []
-    return []
+    tool_ids = [descriptor.id for descriptor in registry.describe()]
+    return AgentProfile(
+        id="default-agent",
+        name="Parlanchina Agent",
+        system_prompt=system_prompt,
+        tool_ids=tool_ids,
+        limits=limits,
+        memory_packs=[],
+    )
 
 
 def _yield_text_chunks(text: str, chunk_size: int = 200) -> List[str]:
     if not text:
         return []
     return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
-
-
-def _safe_tool_name(full_name: str, used: set[str]) -> str:
-    """Generate an OpenAI-compliant tool name and keep a reverse map."""
-    base = re.sub(r"[^a-zA-Z0-9_-]", "_", full_name) or "tool"
-    candidate = base
-    suffix = 1
-    while candidate in used:
-        suffix += 1
-        candidate = f"{base}_{suffix}"
-    return candidate
 
 
 def _extract_text_output(response) -> str:
@@ -762,7 +347,7 @@ def _extract_text_output(response) -> str:
 async def complete_response(messages: List[dict], model: str) -> str:
     """Return a full assistant response using the Responses API."""
 
-    client = _get_client()
+    client = get_async_client()
     started = time.time()
     formatted_messages = _format_input(messages)
 

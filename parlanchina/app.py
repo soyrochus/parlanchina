@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +147,7 @@ def create_app(app_root: Path, dirs: dict) -> Flask:
         return {
             "banner_html": app.config.get("BANNER_HTML", ""),
             "config_html": app.config.get("CONFIG_HTML", ""),
+            "cache_bust": int(time.time()),  # Cache-busting timestamp for static files
         }
 
     return app
